@@ -45,31 +45,37 @@ RUN set -x && \
 
 COPY root/ /
 
-RUN set -x && \
-    arch=`uname -m` && \
-    if [ "$arch" = "x86_64" ]; then \
-        wget -q 'https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz' -O - | tar -xJ -C /tmp/ --one-top-level=ffmpeg && \
-        chmod -R a+x /tmp/ffmpeg/* && \
-        mv $(find /tmp/ffmpeg/* -name ffmpeg) /usr/local/bin/ && \
-        mv $(find /tmp/ffmpeg/* -name ffprobe) /usr/local/bin/ && \
-        mv $(find /tmp/ffmpeg/* -name ffplay) /usr/local/bin/ && \
-        rm -rf /tmp/* ; \
-    else \
-        if [ "$arch" = "aarch64" ]; then arch='arm64'; fi && \
-        wget -q "https://johnvansickle.com/ffmpeg/builds/ffmpeg-git-${arch}-static.tar.xz" -O - | tar -xJ -C /tmp/ --one-top-level=ffmpeg && \
-        chmod -R a+x /tmp/ffmpeg/* && \
-        mv $(find /tmp/ffmpeg/* -name ffmpeg) /usr/local/bin/ && \
-        mv $(find /tmp/ffmpeg/* -name ffprobe) /usr/local/bin/ && \
-        rm -rf /tmp/* ; \
-    fi
+# ffmpeg/ffprobe/ffplay from yt-dlp's FFmpeg builds for both architectures.
+# Downloads are retried and checked against the checksum file published in
+# the same release before extraction (this catches truncated or wrong
+# responses, not a compromised release). The binaries are installed
+# root-owned: the archive's files belong to uid 1001, which could be abc's
+# PUID.
+RUN set -eux && \
+    case "$(uname -m)" in \
+        x86_64) ffarch=linux64 ;; \
+        aarch64) ffarch=linuxarm64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac && \
+    base='https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest' && \
+    file="ffmpeg-master-latest-${ffarch}-gpl.tar.xz" && \
+    mkdir /tmp/ffmpeg && cd /tmp/ffmpeg && \
+    wget -q --tries=5 --waitretry=10 --retry-connrefused "$base/$file" "$base/checksums.sha256" && \
+    grep " $file\$" checksums.sha256 | sha256sum -c - && \
+    tar -xJf "$file" --no-same-owner --strip-components=1 && \
+    install -o root -g root -m 0755 bin/ffmpeg bin/ffprobe bin/ffplay /usr/local/bin/ && \
+    cd / && rm -rf /tmp/*
 
-RUN set -x && \
-    arch=`uname -m` && \
-    wget -q "https://github.com/denoland/deno/releases/latest/download/deno-${arch}-unknown-linux-gnu.zip" -O /tmp/deno.zip && \
-    unzip /tmp/deno.zip -d /tmp/deno/ && \
-    chmod -R a+x /tmp/deno/* && \
-    mv $(find /tmp/deno/* -name deno) /usr/local/bin/ && \
-    rm -rf /tmp/*
+# deno (JavaScript runtime used by yt-dlp for YouTube), same safeguards.
+RUN set -eux && \
+    base='https://github.com/denoland/deno/releases/latest/download' && \
+    file="deno-$(uname -m)-unknown-linux-gnu.zip" && \
+    mkdir /tmp/deno && cd /tmp/deno && \
+    wget -q --tries=5 --waitretry=10 --retry-connrefused "$base/$file" "$base/$file.sha256sum" && \
+    sha256sum -c "$file.sha256sum" && \
+    unzip -q "$file" && \
+    install -o root -g root -m 0755 deno /usr/local/bin/ && \
+    cd / && rm -rf /tmp/*
 
 # YTDLP_VERSION pins yt-dlp for release images; empty installs the latest.
 # AUTOUPDATE sets the default for the runtime self-updater (true for the
