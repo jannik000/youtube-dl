@@ -319,9 +319,14 @@ def validate_channels(text):
 
 def _main(argv):
     if len(argv) >= 2 and argv[1] == 'split':
-        # Emit NUL-separated tokens for the shell script to read into an array.
-        tokens = split_shell_args(argv[2] if len(argv) > 2 else '')
-        sys.stdout.write('\x00'.join(tokens))
+        # Emit NUL-terminated tokens for the shell script to read into an
+        # array. Terminating (not just separating) keeps an empty last token.
+        try:
+            tokens = split_shell_args(argv[2] if len(argv) > 2 else '')
+        except ValueError as err:
+            sys.stderr.write(f'cannot parse arguments: {err}\n')
+            return 1
+        sys.stdout.write(''.join(token + '\x00' for token in tokens))
         return 0
     sys.stderr.write('usage: ytdlp_args.py split "<args>"\n')
     return 2

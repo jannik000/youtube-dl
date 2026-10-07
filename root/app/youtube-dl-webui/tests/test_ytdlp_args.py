@@ -19,6 +19,19 @@ def test_split_strips_comments():
     assert ytdlp_args.split_shell_args('--geo-bypass # a comment') == ['--geo-bypass']
 
 
+def test_split_cli_terminates_every_token(capsys):
+    # youtube-dl.sh reads NUL-terminated tokens; an empty last token must
+    # survive (e.g. --output-na-placeholder '').
+    assert ytdlp_args._main(['x', 'split', "--output-na-placeholder ''"]) == 0
+    assert capsys.readouterr().out == '--output-na-placeholder\x00\x00'
+
+
+def test_split_cli_fails_on_unparsable_input(capsys):
+    # The script skips the line instead of running the URL without its args.
+    assert ytdlp_args._main(['x', 'split', "--match-filter 'unclosed"]) == 1
+    assert capsys.readouterr().out == ''
+
+
 def test_default_args_conf_is_accepted():
     ytdlp_args.validate_args_conf(
         "--output '/downloads/%(uploader)s/%(title)s.%(ext)s'\n"

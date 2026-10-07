@@ -2,13 +2,14 @@
 # The youtubedl_* variables are provided by the container environment.
 # shellcheck disable=SC2154
 
-# Shared splitter: turns a string of yt-dlp arguments into NUL-separated
+# Shared splitter: turns a string of yt-dlp arguments into NUL-terminated
 # tokens using the same shlex rules yt-dlp uses, so per-URL "| args" from
 # channels.txt are parsed without eval. See app/youtube-dl-webui/ytdlp_args.py.
 YTDLP_ARGS_HELPER='/app/youtube-dl-webui/ytdlp_args.py'
 
 split_args() {
-  # Reads a string on stdin arg $1, writes NUL-separated tokens to stdout.
+  # Splits the string $1, writes NUL-terminated tokens to stdout; fails (and
+  # writes nothing) if the string cannot be parsed, e.g. an unclosed quote.
   python3 -I "$YTDLP_ARGS_HELPER" split "$1"
 }
 
@@ -29,7 +30,8 @@ fi
 # Build the list of entries: channels.txt plus optional feeds.
 urls_temp="$(mktemp)"
 batch_file="$(mktemp)"
-trap 'rm -f "$urls_temp" "$batch_file"' EXIT
+args_file="$(mktemp)"
+trap 'rm -f "$urls_temp" "$batch_file" "$args_file"' EXIT
 cat '/config/channels.txt' > "$urls_temp"
 echo '' >> "$urls_temp"
 if [ "$youtubedl_subscriptions" = true ]; then
@@ -71,7 +73,13 @@ while IFS= read -r line || [ -n "$line" ]; do
     url="${url%"${url##*[![:space:]]}"}"
     extra=()
     if [ -n "${argstr//[[:space:]]/}" ]; then
-      mapfile -t -d '' extra < <(split_args "$argstr")
+      # Never run a URL without its limiting args (--playlist-end,
+      # --match-filter, ...): skip the line if they cannot be parsed.
+      if ! split_args "$argstr" > "$args_file"; then
+        echo "[channels] skipping '$url': cannot parse the arguments after '|'"
+        continue
+      fi
+      mapfile -t -d '' extra < "$args_file"
     fi
     "${base_cmd[@]}" "${extra[@]}" -- "$url"
   else
@@ -105,7 +113,15 @@ echo "$youtubedl_binary version: $youtubedl_version"
 if [ "$youtubedl_interval" != 'false' ]
 then
   echo "waiting $youtubedl_interval.."
-  sleep "$youtubedl_interval"
+  # GNU sleep accepts several units ('1d 3h'), so split into words (without
+  # glob expansion). A rejected value must never cause back-to-back passes
+  # (YouTube may ban the IP), so fall back to the default interval.
+  read -r -a interval_parts <<<"$youtubedl_interval"
+  sleep "${interval_parts[@]}"
+  if [ $? -eq 1 ]; then   # 1 = invalid interval (signals give >128)
+    echo "invalid youtubedl_interval '$youtubedl_interval', waiting the default 3h instead.."
+    sleep 3h
+  fi
 else
   echo "youtubedl_interval is set to 'false', container will now exit."
   supervisorctl stop all
