@@ -123,7 +123,7 @@ These only apply when `youtubedl_webui=true`.
 | :---: | :---: | :--- |
 | `WEBUI_USERNAME` | (none) | Username for the browser login (HTTP Basic). Required together with `WEBUI_PASSWORD` to use the browser UI.
 | `WEBUI_PASSWORD` | (none) | Password for the browser login. Use a long, unique value.
-| `WEBUI_API_TOKEN` | (none) | Bearer token for `POST /download` and `POST /api/download` (e.g. the iOS shortcut). A long random string. Does **not** grant access to config editing or logs.
+| `WEBUI_API_TOKEN` | (none) | Bearer token for `POST /api/download` and `POST /download` (e.g. the iOS shortcut); with the token both answer JSON `{"id": "..."}`. A long random string. Does **not** grant access to config editing or logs.
 | `WEBUI_READONLY` | `true` (`false`) | If `true`, the web UI cannot edit `args.conf`, `channels.txt` or `archive.txt`; they are shown read-only.
 | `WEBUI_ALLOWED_DOMAINS` | (none) | Comma-separated allowlist of domains accepted by the download endpoints, e.g. `youtube.com,youtu.be`. Subdomains are included. Unset means any `http(s)` host.
 | `WEBUI_ALLOW_UNSAFE_ARGS` | `true` (`false`) | If `true`, disables validation of saved `args.conf`/`channels.txt`. Only enable if you understand that options such as `--exec` then allow arbitrary command execution.
@@ -135,14 +135,17 @@ refuses to start (fail closed) and logs the reason.
 # Image Tags
 All images are published to `ghcr.io/jannik000/youtube-dl`.
 * **`unstable`**
-    * Automatically built on every code push to `master`.
+    * Built on every push to `master`, after all tests (unit, shellcheck, end-to-end) passed.
     * Has the self-updater enabled, so it tracks the newest yt-dlp from git while running.
 * **`latest`**
-    * Automatically built when a new version of yt-dlp is released.
+    * Built when a new version of yt-dlp is released, after the tests passed against that version.
     * yt-dlp is pinned to that release; update by pulling a new image.
 * **`v<VERSION>`**
-    * Automatically built when a new version of yt-dlp is released.
-    * Pinned to that exact version; does not change.
+    * Same build as `latest`, tagged with the yt-dlp version.
+    * Pinned to that exact version. The self-updater is included but off; setting
+      `youtubedl_autoupdate=true` makes the container leave the pinned version.
+
+No images are published for other branches or pull requests.
 
 # Web UI authentication
 The web UI is protected by two independent mechanisms:
@@ -211,6 +214,10 @@ Because the request carries the bearer token, it is exempt from the browser
 CSRF check. The browser form in the UI uses a CSRF token instead and does not
 need the bearer token.
 
+An existing shortcut that posts to `/download` keeps working once it sends the
+`Authorization` header; with a token, `/download` also answers JSON instead of
+redirecting. Leading or trailing whitespace in the shared URL is ignored.
+
 # Updating
 By default the container does not update yt-dlp by itself. To update, pull a
 newer image (`docker compose pull && docker compose up -d`); a fresh image is
@@ -240,7 +247,10 @@ runtime.
     https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q
     ```
     You can also specify additional args to be used per URL. This is done by adding args after the URL separated by the ` | ` character.  
-    These will override any conflicting args from `args.conf`.
+    These will override any conflicting args from `args.conf`. They are split with shell-style quoting
+    but never run through a shell (`;`, `$(...)` and variables are passed to yt-dlp literally).
+    A line whose args cannot be parsed (e.g. an unclosed quote) is skipped and logged. Use absolute
+    `/downloads/...` paths for output options here.
     ```
     # Examples
     # Output to 'named' folder instead of channel name
@@ -287,7 +297,9 @@ runtime.
     is validated with yt-dlp's own option parser and rejected if it contains
     options that would run commands or write outside `/downloads` (for example
     `--exec`, `--netrc-cmd`, `--plugin-dirs`, `--config-locations`,
-    `--batch-file`, `--alias`, or an output path outside `/downloads`). This is
+    `--batch-file`, `--alias`, `--ppa`, or an output path outside `/downloads`).
+    yt-dlp runs with `/config` as its working directory, so relative output
+    paths are only accepted together with `-P /downloads`. This is
     a safety net, not a sandbox — see [SECURITY-REVIEW.md](SECURITY-REVIEW.md)
     for its limits. Set `WEBUI_READONLY=true` to forbid editing entirely, or
     `WEBUI_ALLOW_UNSAFE_ARGS=true` to disable validation. Editing the file

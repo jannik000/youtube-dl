@@ -51,6 +51,34 @@ Die mit „verifiziert“ markierten Befunde wurden lokal gegen den unverändert
 | G1 | CI: fremde Registry/Secrets, Drittanbieter-Action, veraltete Actions, keine `permissions` | `.github/workflows/*` | Mittel | behoben |
 | G2 | Release-Tag wird ungeprüft in `sed` und Image-Tags übernommen | `release-checker.yml`, Build-Workflows | Niedrig | behoben |
 
+## Nachprüfung vor dem PR
+
+Vor dem Merge wurden die Fixes ein zweites Mal geprüft:
+- unabhängiges Review in vier Bereichen (Web-UI, Validator, Container/Skripte, CI/Doku), jeder Befund
+  von einem zweiten Prüfer gegengeprüft;
+- Browser-Test der Web-UI mit Chromium (Login, Formulare, CSRF aus fremder Origin, XSS, Read-only,
+  Base-Path, iOS-Endpunkt);
+- E2E-Test des echten Images auf GitHub-Runnern (`tests/e2e/run.sh`, Job `e2e` in `ci.yml`).
+
+Dabei fielen folgende Fehler in der ersten Fassung der Fixes auf; alle sind behoben und durch Tests
+abgedeckt:
+
+| ID | Befund | Schweregrad | Status |
+| :--- | :--- | :---: | :--- |
+| R1 | Validator ließ relative Ausgabepfade zu; yt-dlp läuft in `/config`, also hätten `-o`/`--print-to-file` `pre-/post-execution.sh` schreiben können (umgeht W6) | Mittel | behoben |
+| R2 | Validator: Alias `--ppa` umging die Denylist; `-o/downloads/a.mp4` wurde fälschlich abgelehnt | Mittel | behoben |
+| R3 | `abc` → root: venv im `PATH` der root-Prozesse, `abc` konnte das venv in seinem HOME ersetzen (C2/C4) | Mittel | behoben |
+| R4 | Container startete gar nicht: neues Init-Skript ohne Ausführungsrecht (vom E2E-Test gefunden) | Hoch (Betrieb) | behoben |
+| R5 | Mit `PUID` ≠ 911 (z. B. 1026) war `/home/abc` (0700) unzugänglich, yt-dlp/Web-UI hätten nicht starten können | Hoch (Betrieb) | behoben |
+| R6 | Request-Bodies wurden vor der Auth geparst (unauthentifizierte Uploads nach `/tmp`) | Niedrig | behoben |
+| R7 | `/docs`, `/redoc`, `/openapi.json` ohne Auth erreichbar | Niedrig | behoben |
+| R8 | Images wurden ohne Tests veröffentlicht, auch für jeden Branch | Niedrig | behoben |
+| R9 | `youtubedl_interval` mit mehreren Einheiten (`1d 3h`) führte zu Download-Durchläufen direkt hintereinander | Mittel | behoben |
+| R10 | Nicht parsebare `\| args` → URL wurde ohne ihre Limits geladen; leeres letztes Argument ging verloren | Niedrig | behoben |
+| R11 | CSP blockierte Semantic-UI-Schriften; `app.js` 404 hinter präfix-entfernendem Proxy; URLs mit Leerzeichen am Rand abgelehnt | Niedrig | behoben |
+| R12 | Doku beschrieb Mechanismen, die so nicht umgesetzt waren (Nonce, `tojson`, Updater in `v<VERSION>`) | Niedrig | behoben |
+| R13 | Zwei Unit-Tests bestanden aus dem falschen Grund, ein E2E-Check konnte nie bestehen, Lücken in der Abdeckung | Mittel | behoben |
+
 ---
 
 ## Web-UI
@@ -89,8 +117,13 @@ reproduziert: `args.conf` ließ sich ohne Zugangsdaten mit beliebigem Inhalt üb
 **Fix:**
 - Browser: HTTP Basic Auth (`WEBUI_USERNAME`, `WEBUI_PASSWORD`).
 - Kurzbefehl/Skripte: `Authorization: Bearer <WEBUI_API_TOKEN>`. Der Token gilt **nur** für
-  `POST /download` und `POST /api/download`, nicht für Logs, Restart oder Config. Ein gestohlener
-  Token (A3) erlaubt also nur Downloads.
+  `POST /download` und `POST /api/download` (beide antworten bei Token-Auth mit JSON `{"id": …}`),
+  nicht für Logs, Restart oder Config. Ein gestohlener Token (A3) erlaubt also nur Downloads.
+- Die Prüfung läuft in einer Middleware anhand der Header, **bevor** eine Route oder das
+  Body-Parsing startet. Bodies nicht authentifizierter Clients werden nie gelesen oder nach `/tmp`
+  gespoolt. Ohne Login erreichbar sind nur `/favicon.ico` und `/static/app.js`; auch unbekannte
+  Routen liefern 401. Die Routen prüfen zusätzlich selbst (zweite Schicht).
+- Die automatische API-Doku von FastAPI (`/docs`, `/redoc`, `/openapi.json`) ist abgeschaltet.
 - Vergleich mit `secrets.compare_digest` auf Bytes.
 - Fail closed: Ist die Web-UI aktiv, aber weder Basic-Zugangsdaten noch Token gesetzt (oder nur
   Benutzername ohne Passwort), startet sie nicht. `80-webui` meldet das gut sichtbar im
@@ -133,8 +166,10 @@ bei aktiver Basic Auth läuft das Skript mit den Rechten des angemeldeten Nutzer
 CSRF-Token und Origin-Prüfung aus W3 wirkungslos: Das Skript läuft auf derselben Origin, kann den
 Token lesen und die Config ändern.
 
-**Fix:** `download_id` muss eine UUID sein (sonst 404). Werte in JavaScript-Kontexten werden mit
-`|tojson` eingesetzt. Zusätzlich gibt es eine CSP mit Nonce für Inline-Skripte (W9).
+**Fix:** `download_id` muss eine UUID in kanonischer Schreibweise sein (sonst 404). Es gibt keine
+Inline-Skripte mehr: Das Log-Polling liegt in `static/app.js`, das seine Parameter aus
+`data-*`-Attributen liest (HTML-escaped, nie in Skript-Quelltext eingesetzt). Die CSP erlaubt
+Skripte nur von `'self'` (W9), eingeschleuster Inline-Code würde also auch sonst nicht laufen.
 
 ### W5 – Option-Injection über die URL · Hoch · verifiziert
 
@@ -197,7 +232,7 @@ eingeschlossen. Ohne Allowlist bleibt SSRF für Inhaber gültiger Zugangsdaten m
 Positiv: Die Log-Anzeige nutzt `textContent`, nicht `innerHTML`. Damit gibt es keine XSS über Log-Inhalte.
 
 **Fix:** Auth (W2). Die ID wird als UUID validiert (sonst 404). Es gibt nur noch generische
-Fehlermeldungen. Ausgeliefert werden nur die letzten 256 KiB, das Polling-Intervall ist 2 s.
+Fehlermeldungen. Beide Log-Endpunkte liefern nur die letzten 256 KiB, das Polling-Intervall ist 2 s.
 
 ### W9 – Fehlende Security-Header · Niedrig
 
@@ -205,9 +240,11 @@ Fehlermeldungen. Ausgeliefert werden nur die letzten 256 KiB, das Polling-Interv
 Keine CSP. Das Semantic-UI-CSS kommt vom CDN ohne SRI.
 
 **Fix:** Middleware setzt:
-- `Content-Security-Policy`: `default-src 'self'`, Skripte nur mit Nonce, Styles/Fonts zusätzlich
-  von `cdn.jsdelivr.net`, `frame-ancestors 'none'`, `form-action 'self'`, `base-uri 'none'`,
-  `object-src 'none'`
+- `Content-Security-Policy`: `default-src 'self'`, `script-src 'self'` (keine Inline-Skripte),
+  Styles zusätzlich von `cdn.jsdelivr.net` und `fonts.googleapis.com`, Fonts von `cdn.jsdelivr.net`,
+  `fonts.gstatic.com` und `data:` (Semantic UI lädt Lato von Google Fonts und bettet seine
+  Icon-Fonts als `data:`-URIs ein), `frame-ancestors 'none'`, `form-action 'self'`,
+  `base-uri 'none'`, `object-src 'none'`
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: same-origin`
 - `X-Frame-Options: DENY`
@@ -282,23 +319,37 @@ kommt der Code sogar direkt vom Git-`master`. Ein kompromittiertes Release oder 
 damit innerhalb von Stunden zu Codeausführung, ohne dass ein neues Image gebaut oder geprüft wird.
 Auch der Rückweg ist schwierig: Nach einem Container-Neustart ist das alte Paket schon ersetzt.
 
-**Fix:** Neue Variable `youtubedl_autoupdate`, **Standard `false`**. `youtubedl_autoupdate=true`
-stellt das alte Verhalten her. Aktuelles yt-dlp kommt stattdessen über neue Images, die die CI bei
-jedem yt-dlp-Release automatisch baut (`docker compose pull`). Die `v<VERSION>`-Images enthalten den
-Updater weiterhin gar nicht.
+**Fix:** Neue Variable `youtubedl_autoupdate`, **Standard `false`** (nur das rollende `:unstable`
+wird mit `true` gebaut). `youtubedl_autoupdate=true` stellt das alte Verhalten her. Aktuelles yt-dlp
+kommt stattdessen über neue Images, die die CI bei jedem yt-dlp-Release automatisch baut und vorher
+testet (`docker compose pull`). Anders als upstream enthalten auch die `v<VERSION>`-Images den
+(abgeschalteten) Updater; wer ihn dort per Env einschaltet, verlässt die gepinnte Version.
 
 ### C2 – App-Code gehört dem Laufzeit-User · Niedrig
 
-**Fundstelle:** `root/etc/cont-init.d/90-user-permissions`, `chown -R abc:abc /app`.
+**Fundstelle:** `root/etc/cont-init.d/90-user-permissions` (`chown -R abc:abc /app` und
+`/home/abc` samt venv), `Dockerfile` (`PATH` mit dem venv vorn), Supervisor-Konfiguration.
 
-**Befund:** Wer einmal Code als `abc` ausführt, kann `/app` (Web-UI, Download-Skript) verändern und
-sich bis zur Neuerstellung des Containers festsetzen. `/home/abc/.venv` muss nur bei aktivem Updater
-`abc` gehören.
+**Befund:** Wer einmal Code als `abc` ausführt, kann `/app` (Web-UI, Download-Skript) und das venv
+mit yt-dlp verändern und sich bis zur Neuerstellung des Containers festsetzen. Schlimmer (in der
+Nachprüfung gefunden, R3): Das venv stand im `PATH` aller **root**-Prozesse: Init-Skripte bei jedem
+Start, supervisord und das root-`terminate`, das `abc` per `supervisorctl` starten darf. Ein von
+`abc` abgelegtes `/home/abc/.venv/bin/cat` o. Ä. wäre damit als root gelaufen.
 
-**Fix:** `/app` bleibt `root`-eigen und nur lesbar. Das venv wird nur bei
-`youtubedl_autoupdate=true` an `abc` übergeben, sonst `root:root`. `chown -R` auf `/config` und
-`/downloads` bleibt; Hardlinks aus dem Container-Dateisystem in diese Volumes sind nicht möglich, weil
-sie auf anderen Dateisystemen liegen.
+**Fix:**
+- `/app` und das venv bleiben `root`-eigen und nur lesbar. Das venv liegt jetzt unter `/opt/venv`,
+  also in einem root-eigenen Elternverzeichnis; `abc` kann es auch nicht umbenennen und ersetzen.
+  An `abc` übergeben wird es nur bei `youtubedl_autoupdate=true`.
+- `entrypoint.sh` setzt für alle root-Prozesse einen `PATH` nur aus Systemverzeichnissen. Die
+  `abc`-Programme bekommen das venv per `environment=` in ihrer Supervisor-Konfiguration, uvicorn
+  wird mit absolutem Pfad gestartet, `terminate.sh` nutzt nur absolute Pfade.
+- `abc`s HOME (`/home/abc`) gehört immer `abc`, auch nach einem `PUID`-Wechsel (sonst kein Cache).
+- `chown -R` auf `/config` und `/downloads` bleibt; Hardlinks aus dem Container-Dateisystem in diese
+  Volumes sind nicht möglich, weil sie auf anderen Dateisystemen liegen.
+- Der E2E-Test prüft root-Eigentum, die Unersetzbarkeit des venv und den `PATH` von supervisord.
+
+**Restrisiko:** Mit `youtubedl_autoupdate=true` gehört das venv `abc`. Ein `docker exec` als root,
+das `yt-dlp` o. Ä. über den Image-`PATH` aufruft, würde dann von `abc` kontrollierten Code ausführen.
 
 ### C3 – `PUID=0`/`PGID=0` · Niedrig
 
@@ -307,11 +358,14 @@ sie auf anderen Dateisystemen liegen.
 
 ### C4 – Supervisor · Info
 
-Die Zugangsdaten für den Unix-Socket werden beim ersten Start zufällig erzeugt (`91-supervisor-credentials`).
-Die Konfiguration ist für `abc` lesbar; das ist nötig, damit die Web-UI `supervisorctl restart`
-ausführen kann. `abc` kann damit nur die definierten Programme steuern. Das als root laufende
-`terminate` beendet supervisord, ermöglicht also nur einen DoS gegen den eigenen Container und keine
-Rechteausweitung. Der Socket liegt unter `/etc/supervisor` mit Modus 0700 und gehört `abc`. Belassen.
+Die Zugangsdaten für den Unix-Socket werden beim Start zufällig erzeugt (`91-supervisor-credentials`,
+jetzt mit getrenntem Benutzernamen und Passwort). Die Konfiguration ist für `abc` lesbar; das ist
+nötig, damit die Web-UI `supervisorctl restart` ausführen kann. `abc` kann damit nur die definierten
+Programme steuern. supervisord und `terminate` laufen als **root**; `abc` darf `terminate` starten.
+Das ist nur ein DoS gegen den eigenen Container, **sofern** root keine von `abc` kontrollierten
+Programme ausführt. Die ursprüngliche Einschätzung „keine Rechteausweitung“ stimmte deshalb erst
+nach dem Fix aus C2 (bereinigter root-`PATH`, absolute Pfade in `terminate.sh`). Der Socket liegt
+unter `/etc/supervisor` mit Modus 0700 und gehört `abc`.
 
 ### C5 – Build lädt ffmpeg/deno „latest“ ohne Prüfsumme · Niedrig
 
@@ -338,9 +392,13 @@ CVEs zeigen aber, dass der Stack relevant ist:
 - Jinja2 CVE-2024-56201, CVE-2024-56326 und CVE-2025-27516 (Sandbox; hier nicht nutzbar, da keine
   Templates von außen kommen)
 
-**Fix:** Direkte und transitive Abhängigkeiten mit exakten Versionen gepinnt, `pip-audit` läuft in
-der CI, Dependabot hält die Pins aktuell. yt-dlp selbst bleibt bewusst ungepinnt; die Release-Builds
-pinnen es auf das jeweilige Release.
+**Fix:** Direkte und transitive Abhängigkeiten der Web-UI mit exakten Versionen gepinnt, `pip-audit`
+läuft in der CI, Dependabot hält die Pins aktuell. yt-dlp selbst steht bewusst nicht in
+`requirements.txt`; die Image-Builds pinnen es per Build-Arg auf das jeweilige Release.
+
+**Restrisiko:** Die Abhängigkeiten von yt-dlp (`brotli`, `certifi`, `mutagen`, `pycryptodomex`,
+`requests`, `urllib3`, `websockets`, `yt-dlp-ejs`, …) sind nicht gepinnt und werden von `pip-audit`
+nicht erfasst; sie kommen beim Build in der jeweils aktuellen Version.
 
 ### G1 – GitHub Actions · Mittel
 
@@ -360,9 +418,12 @@ pinnen es auf das jeweilige Release.
 - Push nach `ghcr.io/jannik000/youtube-dl` mit `GITHUB_TOKEN` (`packages: write`), keine fremden Secrets.
 - Die Drittanbieter-Action ist entfernt; stattdessen `github.ref_name` und Bash.
 - Actions auf aktuelle Versionen per Commit-SHA gepinnt, `permissions` minimal pro Workflow.
-- Der Release-Checker committet mit `GITHUB_TOKEN` und startet die Release-Builds per
-  `workflow_dispatch`. Kein PAT nötig, weil `workflow_dispatch` über `GITHUB_TOKEN` ausgelöst werden darf.
-- Neuer Test-Workflow (pytest, `pip-audit`, shellcheck) für Pushes und Pull Requests.
+- `release.yml` prüft zweimal täglich auf ein neues yt-dlp-Release, testet es (pytest und E2E mit
+  genau dieser Version) und committet die Version erst danach mit `GITHUB_TOKEN`. Gebaut und
+  gepusht wird im selben Job; kein PAT nötig. Ein manueller Start baut immer.
+- `ci.yml` (pytest, `pip-audit`, shellcheck, E2E) läuft für alle Pushes und Pull Requests.
+  `:unstable` wird nur auf `master` und erst nach allen Tests gepusht. Für andere Branches, PRs und
+  Dependabot werden keine Images mehr veröffentlicht (in der Nachprüfung gefunden, R8).
 
 ### G2 – Release-Tag ungeprüft · Niedrig
 
@@ -380,34 +441,45 @@ Nur Admins (Basic Auth) dürfen schreiben, und mit `WEBUI_READONLY=true` niemand
 So funktioniert sie:
 - `args.conf` wird wie von yt-dlp zerlegt (shlex mit Kommentaren). Jede `channels.txt`-Zeile mit `|`
   wird wie in `youtube-dl.sh` zerlegt.
-- Beides geht durch `yt_dlp.parse_options()`. So werden Abkürzungen, gebündelte Kurzoptionen und
-  `--alias` genauso aufgelöst wie zur Laufzeit.
-- Geprüft werden die resultierenden Optionswerte. Abgelehnt werden:
+- Die Tokens werden mit yt-dlps eigenem Parser nach optparse-Regeln durchlaufen: Abkürzungen und
+  Aliase (z. B. `--ppa` für `--postprocessor-args`) werden auf das **Option-Objekt** aufgelöst,
+  Optionswerte, die mit `-` beginnen, und angehängte Kurzoptionswerte (`-o/downloads/a.mp4`) werden
+  korrekt als Werte erkannt. Mehrdeutige oder unbekannte Optionen werden abgelehnt.
+- Zusätzlich geht alles durch `yt_dlp.parse_options()`, und die resultierenden Optionswerte werden
+  geprüft (zweite, namensunabhängige Schicht). Abgelehnt werden:
   - `--exec`/`--exec-before-download` (alle Varianten), `--netrc-cmd`
   - `--plugin-dirs`, `--use-postprocessor`
   - `--config-locations`, `--batch-file`, `--load-info-json`, `--alias`
   - `--ffmpeg-location`, `--downloader` mit Pfad oder `ffmpeg`, `--downloader-args`, `--postprocessor-args`
   - `--cookies-from-browser`, `--cookies`, `--netrc-location`, `--cache-dir`
   - `--output`/`--paths`/`--print-to-file`/`--download-archive`, sofern sie aus `/downloads` hinausführen
-    (`--download-archive` darf zusätzlich `/config/archive.txt` sein)
+    (`--download-archive` darf zusätzlich `/config/archive.txt` sein). Pfade werden aufgelöst wie in
+    yt-dlp: relativ zum Arbeitsverzeichnis **`/config`** bzw. zum `--paths`-`home`. Ein relatives
+    `-o x` oder `--print-to-file … post-execution.sh` landet also in `/config` und wird abgelehnt
+    (in der Nachprüfung gefunden, R1). Werte mit `~` oder `$` werden abgelehnt, weil yt-dlp sie
+    abhängig von der Laufzeitumgebung expandiert.
   - `--enable-file-urls`, `--load-info-json`, `--update`/`--update-to`
 - Zusätzlich sind Shell-Metazeichen-Konstrukte `$(` und Backticks abgelehnt. Sie würden zwar seit S2
   nicht mehr ausgewertet, deuten aber auf alte, nun wirkungslose Konfiguration hin.
 
 Grenzen:
 1. **Denylist:** Künftige yt-dlp-Versionen können neue gefährliche Optionen einführen, die hier nicht
-   erfasst sind. Der Test-Workflow prüft die Liste nur gegen die aktuell gepinnte Version.
+   erfasst sind. Die Tests laufen gegen die gepinnte Version, und `release.yml` testet jede neue
+   Version vor der Veröffentlichung; neue *gefährliche* Optionen erkennt das aber nicht automatisch.
 2. **Bedeutung statt Syntax:** Erlaubte Optionen können in Kombination unerwünscht wirken, etwa
    `--match-filter`/`--download-sections` zur Ressourcenerschöpfung oder Output-Templates, die sehr
    viele Dateien erzeugen. Ausgabepfade werden vor der Template-Auswertung geprüft. Template-Felder
-   wie `%(title)s` können keine Pfadtrenner einschleusen, weil yt-dlp sie sanitisiert; Templates mit
-   `..` als festem Teil werden abgelehnt.
-3. **API-Kopplung:** `yt_dlp.parse_options` ist keine stabil dokumentierte API. Ändert sich ihr
-   Verhalten, schlägt die Prüfung fehl und das Speichern wird abgelehnt (fail closed), statt still
-   durchzulassen.
-4. **Andere Schreibwege:** Die Prüfung greift nur beim Speichern über die Web-UI. Wer `/config` direkt
+   wie `%(title)s` können keine Pfadtrenner einschleusen, weil yt-dlp sie sanitisiert; feste `..`
+   werden mit aufgelöst und dürfen nicht aus `/downloads` herausführen.
+3. **Getrennte Prüfung:** `args.conf` und jede `| args`-Zeile werden einzeln geprüft. Eine Zeile mit
+   relativem `-o` wird also auch dann abgelehnt, wenn `args.conf` ein passendes `-P /downloads`
+   setzt; in `channels.txt` daher absolute `/downloads/…`-Pfade verwenden.
+4. **API-Kopplung:** `yt_dlp.parse_options` und die Parser-Interna (`_match_long_opt`, `_long_opt`)
+   sind keine stabil dokumentierte API. Ändert sich ihr Verhalten, schlägt die Prüfung fehl und das
+   Speichern wird abgelehnt (fail closed), statt still durchzulassen.
+5. **Andere Schreibwege:** Die Prüfung greift nur beim Speichern über die Web-UI. Wer `/config` direkt
    beschreiben kann (Synology-Freigabe, `docker exec`, `docker cp`), umgeht sie; das ist gewollt.
-5. **Nicht geprüft:** `archive.txt` enthält nur IDs und wird nicht interpretiert.
+6. **Nicht geprüft:** `archive.txt` enthält nur IDs und wird nicht interpretiert.
 
 ## Verbleibende Empfehlungen
 

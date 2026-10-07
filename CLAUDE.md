@@ -9,57 +9,59 @@ This is not the youtube-dl source. It is a **Docker image** (published as `ghcr.
 ## Commands
 
 ```bash
-# Web UI + validator tests (needs the pinned deps plus yt-dlp, pytest, httpx)
-pip install -r root/app/requirements.txt 'yt-dlp[default]' pytest httpx
+# Web UI + validator tests (pinned deps plus the yt-dlp version the images use)
+pip install -r root/app/requirements.txt "yt-dlp[default]==$(cat release-versions/latest.txt)" pytest httpx
 pytest -q root/app/youtube-dl-webui/tests
 pytest -q root/app/youtube-dl-webui/tests/test_webui.py::test_api_token_is_csrf_exempt   # single test
 
 # Shell lint (CI runs exactly this)
-shellcheck --severity=warning root/entrypoint.sh root/app/youtube-dl/*.sh root/etc/cont-init.d/* root/etc/supervisor/terminate.sh
+shellcheck --severity=warning root/entrypoint.sh root/app/youtube-dl/*.sh root/etc/cont-init.d/* \
+  root/etc/supervisor/terminate.sh tests/e2e/run.sh
 
 # Dependency audit
 pip-audit -r root/app/requirements.txt --strict
 
-# Build and run the image
-docker build -t youtube-dl-dev .
-docker run --rm -it -v "$PWD/tmp-config:/config" -v "$PWD/tmp-downloads:/downloads" \
-  -e youtubedl_webui=true -e WEBUI_USERNAME=dev -e WEBUI_PASSWORD=dev-password \
-  -e youtubedl_interval=false -p 8080:8080 youtube-dl-dev
+# End-to-end: builds the image and tests running containers (needs a Docker daemon that can build)
+bash tests/e2e/run.sh
+#   E2E_SKIP_BUILD=1 E2E_IMAGE=<tag>  -> test an existing image
+#   E2E_BUILD_ARGS='--build-arg YTDLP_VERSION=2026.08.19' -> extra docker build args
 ```
 
 `youtubedl_interval=false` makes the container run one download pass and then exit. Settings come from `youtubedl_*` and `WEBUI_*` env vars; defaults are in the `Dockerfile` and documented in `README.md`.
 
 ## Runtime architecture
 
-1. **`/entrypoint.sh`** runs every script in `/etc/cont-init.d/` in glob order (numeric prefixes set the order) and **aborts the container if one fails**. It then starts supervisord.
+1. **`/entrypoint.sh`** sets a system-only `PATH` for all root processes, runs every script in `/etc/cont-init.d/` in glob order (numeric prefixes set the order) and **aborts the container if one fails**. It then starts supervisord. Every file in `cont-init.d` must be executable (a unit test checks this).
    - `05-default-confs`: copies `/config.default/{args.conf,channels.txt}` into `/config` if missing, symlinks `/config/args.conf` to `/etc/yt-dlp.conf`, substitutes `$youtubedl_quality` in `/config.default/format`.
    - `07-updater`: removes the updater's supervisor conf unless `youtubedl_autoupdate=true`.
    - `10-update-args`: replaces `/config/args.conf` with the new default if it matches the md5 of an **old default**. **When you change `root/config.default/args.conf`, add the md5 of the previous default to `old_default_hashes`.**
    - `80-webui`: removes the webui conf unless `youtubedl_webui=true` **and** credentials are set (fail closed, logged).
-   - `90-user-permissions`: refuses `PUID`/`PGID` 0, applies them to user `abc`, chowns `/config`, `/downloads`, `/var/log`. `/home/abc` (HOME, created 0700) always goes to `abc`, but `/app` and `/home/abc/.venv` stay root-owned and read-only; the venv is chowned only when the updater is enabled. Test any change here with a `PUID` other than 911.
+   - `90-user-permissions`: refuses `PUID`/`PGID` 0, applies them to user `abc`, chowns `/config`, `/downloads`, `/var/log` and abc's HOME `/home/abc`. `/app` and the venv `/opt/venv` stay root-owned (root-owned parents, so abc cannot replace them); the venv is chowned only when the updater is enabled. Test changes here with a `PUID` other than 911.
    - `91-supervisor-credentials`: random socket username/password.
-2. **supervisord** runs as `abc`: `youtube-dl` (`youtube-dl.sh`, tees to `/var/log/youtube-dl/youtube-dl.log`), optional `youtube-dl-updater`, optional `youtube-dl-webui` (`uvicorn ... youtube-dl-webui:webserver`), and the non-autostarted `terminate`.
+2. **supervisord** (root) runs `youtube-dl` (`youtube-dl.sh`, tees to `/var/log/youtube-dl/youtube-dl.log`), the optional `youtube-dl-updater` and `youtube-dl-webui` as `abc`, and the non-autostarted `terminate` as root. abc's programs get `PATH` (with `/opt/venv/bin`) and `HOME` via `environment=`; supervisor resolves `command=` with its own system `PATH`, so venv binaries need absolute paths there (`/opt/venv/bin/uvicorn`). Root processes must never resolve commands through a PATH that contains abc-writable directories.
+3. All yt-dlp processes run with the WORKDIR `/config` as current directory, so relative output paths land in `/config`.
 
 Env flags are compared as `[ "$var" = true ]` — never execute them (`if $var`).
 
 ### `youtube-dl.sh` (core download loop)
 - Builds the yt-dlp command as a **bash array**; there is **no `eval`** (a test enforces this).
 - Adds `--format` and `--download-archive /config/archive.txt` only if `args.conf` doesn't set them; `--cookies` when `/config/cookies.txt` exists.
-- `channels.txt` lines with `URL | extra args` run individually; the args are split by `ytdlp_args.py split` (shlex, NUL-separated) and passed before `-- URL`. Plain URLs run together via a temp `--batch-file`. Shell syntax in these args is never interpreted.
+- `channels.txt` lines with `URL | extra args` run individually; the args are split by `ytdlp_args.py split` (shlex, NUL-terminated tokens) and passed before `-- URL`. A line whose args cannot be parsed is skipped. Plain URLs run together via a temp `--batch-file`.
+- The interval is split into words for `sleep` (`1d 3h`); an invalid value falls back to 3h so passes never run back to back.
 
 ### Web UI (`root/app/youtube-dl-webui/`)
 - `youtube-dl-webui.py`: `create_app()` factory; `webserver` is created lazily via module `__getattr__` (uvicorn resolves it on startup). Paths live in the `PATHS` object so tests can redirect them.
-- `webui_security.py`: env-based `Config` (fail closed via `startup_error()`), Basic auth (browser), Bearer token (only `POST /download` and `POST /api/download`), CSRF token + `Sec-Fetch-Site` check (Bearer requests exempt), URL validation (`WEBUI_ALLOWED_DOMAINS`), security headers/CSP.
-- `ytdlp_args.py`: shared by the UI (validation on save) and `youtube-dl.sh` (splitting). Validation walks tokens with **yt-dlp's own parser** (resolving abbreviations and aliases by Option object), then checks parsed values and output paths. It is defense in depth, not a sandbox.
+- An HTTP middleware authenticates from the headers **before** routes and body parsing run; only `PUBLIC_PATHS` (`/favicon.ico`, `/static/app.js`) are open, and the API token is accepted only on `TOKEN_ROUTES` (`POST /download`, `POST /api/download`, both answer JSON for token clients). Route dependencies authenticate again and drive CSRF. FastAPI's `/docs`/`/openapi.json` are disabled.
+- `webui_security.py`: env-based `Config` (fail closed via `startup_error()`), Basic/Bearer auth with `compare_digest`, CSRF token + `Sec-Fetch-Site` check (Bearer requests exempt), URL validation (stripped, http/https only, optional `WEBUI_ALLOWED_DOMAINS`), security headers/CSP.
+- `ytdlp_args.py`: shared by the UI (validation on save) and `youtube-dl.sh` (splitting). Validation walks tokens with **yt-dlp's own parser**, matching denied options by Option object (covers aliases like `--ppa`), then checks parsed values and resolves output paths like `YoutubeDL.get_output_path()` (relative to `/config`/`--paths home`). It is defense in depth, not a sandbox.
 - Downloads run via `create_subprocess_exec` with `--` before the URL. Never use `create_subprocess_shell`/`shell=True` (a test greps for it).
-- Templates get `base_path`, `csrf_token`, `readonly`. Every POST form needs `<input type="hidden" name="csrf_token" value="{{ csrf_token }}">`. No inline scripts: CSP is `script-src 'self'`; JS lives in `static/app.js` and reads parameters from `data-*` attributes.
+- Templates get `base_path`, `csrf_token`, `readonly`. Every POST form needs `<input type="hidden" name="csrf_token" value="{{ csrf_token }}">`. No inline scripts: CSP is `script-src 'self'`; JS lives in `static/app.js` (served by a route, not a StaticFiles mount, so it works behind prefix-stripping proxies) and reads parameters from `data-*` attributes.
 - `TemplateResponse(request, name, context)` uses the Starlette 1.0 signature.
 - `root/app/requirements.txt` is fully pinned (direct + transitive); Dependabot updates it.
 
 ## CI / release flow (`.github/workflows/`)
 
 All workflows use the built-in `GITHUB_TOKEN`, minimal `permissions`, and actions pinned by commit SHA.
-- `ci.yml`: pytest, pip-audit, shellcheck on every push and PR.
-- `release.yml` (cron twice a day + manual): fetches the latest yt-dlp tag, validates its format, writes `release-versions/latest.txt`, commits `Release: v<version>`, and builds `:latest` and `:v<version>` with build args `YTDLP_VERSION=<version>`, `AUTOUPDATE=false`.
-- `unstable.yml`: on code pushes, builds `:unstable` (master) or a branch-slug tag with `AUTOUPDATE=true`. On master it rewrites the `pip ... yt-dlp[default]` line of `updater.sh` (matched by pattern) to install from git and adds `git` after `python3-pip` in the Dockerfile.
+- `ci.yml` (every push and PR): `test` (pytest against the yt-dlp version in `release-versions/latest.txt`, pip-audit), `shellcheck`, `e2e` (`tests/e2e/run.sh` on the runner). `publish-unstable` builds `:unstable` (`AUTOUPDATE=true`, updater rewritten to install yt-dlp from git, `git` added after `python3-pip` in the Dockerfile) **only on master and only after all three passed**. No images for other branches or PRs.
+- `release.yml` (cron twice a day + manual): fetches the latest yt-dlp tag, validates its format, runs pytest and the e2e suite against exactly that version, then writes `release-versions/latest.txt`, commits `Release: v<version>`, and builds `:latest` and `:v<version>` with build args `YTDLP_VERSION=<version>`, `AUTOUPDATE=false`. A manual run always builds.
 - yt-dlp is pinned via the `YTDLP_VERSION` build arg, not by editing the Dockerfile. Images are built for `linux/amd64` and `linux/arm64`.
