@@ -33,6 +33,18 @@ jobs:
       - name: Audit pinned dependencies for known CVEs
         run: pip-audit -r root/app/requirements.txt --strict
 
+  e2e:
+    # Builds the real image (amd64) and tests running containers: auth, CSRF,
+    # injection payloads, fail-closed start, PUID handling, file ownership.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Run end-to-end tests
+        run: bash tests/e2e/run.sh
+
   shellcheck:
     runs-on: ubuntu-latest
     steps:
@@ -46,4 +58,5 @@ jobs:
             root/entrypoint.sh \
             root/app/youtube-dl/*.sh \
             root/etc/cont-init.d/* \
-            root/etc/supervisor/terminate.sh
+            root/etc/supervisor/terminate.sh \
+            tests/e2e/run.sh

@@ -14,6 +14,7 @@ on:
       - 'SECURITY-REVIEW.md'
       - 'CLAUDE.md'
       - 'release-versions/**'
+      - 'tests/**'
 
 permissions:
   contents: read
