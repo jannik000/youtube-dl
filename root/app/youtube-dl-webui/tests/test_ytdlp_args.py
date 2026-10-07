@@ -142,6 +142,10 @@ def test_output_outside_downloads_rejected(content):
     "--print-to-file title ' /downloads/loot'",
     "--download-archive ' /downloads/a.txt'",
     "--write-pages",                            # dumps pages into /config
+    # inside /downloads relative to home, but outside relative to the
+    # shallower temp/thumbnail directory yt-dlp also writes into
+    "-P /downloads/sub -P temp:/downloads -o '../config/x'",
+    "-P /downloads/a/b -P thumbnail:/downloads -o 'thumbnail:../config/x'",
 ])
 def test_paths_resolving_outside_downloads_rejected(content):
     with pytest.raises(ytdlp_args.ArgsError):

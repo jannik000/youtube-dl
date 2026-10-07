@@ -102,12 +102,27 @@ jobs:
     permissions:
       contents: write
       packages: write
+    env:
+      # Outputs of the untrusted verify job: re-validated below, passed to
+      # scripts only through the environment.
+      VERSION: ${{ needs.verify.outputs.version }}
+      CHANGED: ${{ needs.verify.outputs.changed }}
     steps:
+      - name: Re-validate inputs from verify
+        run: |
+          set -euo pipefail
+          printf '%s' "$VERSION" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(\.[0-9]+)?$'
+          case "$CHANGED" in true|false) ;; *) exit 1 ;; esac
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+        with:
+          # Never run a binfmt image restored from the shared Actions cache
+          # (writable by other jobs) with --privileged in this job.
+          cache-image: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
@@ -127,20 +142,35 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            YTDLP_VERSION=${{ needs.verify.outputs.version }}
+            YTDLP_VERSION=${{ env.VERSION }}
             AUTOUPDATE=false
           tags: |
             ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:v${{ needs.verify.outputs.version }}
+            ${{ env.IMAGE }}:v${{ env.VERSION }}
 
       # Recorded only after the push succeeded; if anything before failed, the
-      # missing image makes the next scheduled run build again.
+      # missing image makes the next scheduled run build again. master may
+      # have moved since the run started, so commit on top of its current
+      # head (and skip if another run already recorded the version).
       - name: Record new release version
-        if: needs.verify.outputs.changed == 'true'
+        if: env.CHANGED == 'true'
         run: |
           set -euo pipefail
-          echo "${{ needs.verify.outputs.version }}" > release-versions/latest.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -am "Release: v${{ needs.verify.outputs.version }}"
-          git push
+          for attempt in 1 2 3; do
+            git fetch --depth=1 origin master
+            git checkout -q -B master origin/master
+            if [ "$(cat release-versions/latest.txt 2>/dev/null)" = "$VERSION" ]; then
+              echo "v$VERSION is already recorded on master."
+              exit 0
+            fi
+            printf '%s\n' "$VERSION" > release-versions/latest.txt
+            git commit -qam "Release: v$VERSION"
+            if git push origin master; then
+              exit 0
+            fi
+            echo "push rejected (attempt $attempt), retrying"
+            sleep 5
+          done
+          exit 1

@@ -258,17 +258,22 @@ def _check_paths(options):
     if home_value is not None and home_value.strip():
         base = _resolve(home_value, CONFIG_DIR, strip=True)
         _require_under_downloads(home_value, base)
+    # yt-dlp writes to join(home, paths[type], filename), e.g. temp files
+    # under the 'temp' directory. A template that stays inside /downloads
+    # relative to home may still climb out relative to a shallower type
+    # directory, so every template is checked against every base.
+    bases = [base]
     for directory in paths.values():
         if directory.strip():
-            _require_under_downloads(directory,
-                                     _resolve(directory, base, strip=True))
-    for templ in (options.outtmpl or {}).values():
-        if templ:
-            _require_under_downloads(templ, _resolve(templ, base))
+            resolved = _resolve(directory, base, strip=True)
+            _require_under_downloads(directory, resolved)
+            bases.append(resolved)
+    targets = [t for t in (options.outtmpl or {}).values() if t]
     for entries in (options.print_to_file or {}).values():
-        for _template, filename in entries:
-            if filename:
-                _require_under_downloads(filename, _resolve(filename, base))
+        targets += [filename for _template, filename in entries if filename]
+    for target in targets:
+        for target_base in bases:
+            _require_under_downloads(target, _resolve(target, target_base))
     if options.download_archive:
         # The archive is opened relative to the working directory, not home.
         archive = options.download_archive

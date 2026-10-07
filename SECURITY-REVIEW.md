@@ -95,6 +95,14 @@ Eine zweite Nachprüfung (gleiches Verfahren) bestätigte, dass R1–R13 behoben
 | R23 | Doku: Supervisor-Befehlsauflösung, CSP-Details (W9) | Niedrig | behoben |
 | R24 | Ein öffentliches Branch-Image (`:claude-init-ftoj5p`, Stand vor R1/R3) liegt noch in GHCR | Niedrig | **manuell löschen** |
 
+Eine abschließende Prüfung nur der Änderungen aus der zweiten Nachprüfung fand noch:
+
+| ID | Befund | Schweregrad | Status |
+| :--- | :--- | :---: | :--- |
+| R25 | Validator: `-P home` tief + `-P temp:`/Typ-Verzeichnis flach + relatives `-o '../…'` verließ `/downloads` (yt-dlp schreibt nach `home/typ/template`); jedes Template wird jetzt gegen jede Basis geprüft | Niedrig | behoben |
+| R26 | `release.yml`: Versions-Commit scheiterte, wenn `master` sich während des Laufs bewegte; Ausgaben des nicht vertrauenswürdigen `verify`-Jobs wurden in `publish` nicht erneut geprüft; QEMU-Image aus dem gemeinsamen Actions-Cache lief privilegiert | Niedrig | behoben |
+| R27 | Doku: in Forks laufen geplante Workflows erst nach manuellem Aktivieren, `:latest` entsteht nicht durch den Merge; Optionsliste in W6 unvollständig | Niedrig | behoben |
+
 ---
 
 ## Web-UI
@@ -483,7 +491,8 @@ So funktioniert sie:
   - `--exec`/`--exec-before-download` (alle Varianten), `--netrc-cmd`
   - `--plugin-dirs`, `--use-postprocessor`
   - `--config-locations`, `--batch-file`, `--load-info-json`, `--alias`
-  - `--ffmpeg-location`, `--downloader` mit Pfad oder `ffmpeg`, `--downloader-args`, `--postprocessor-args`
+  - `--ffmpeg-location`, `--downloader`/`--external-downloader` (jeder Wert), `--downloader-args`, `--postprocessor-args`
+  - `--write-pages` (schreibt Debug-Dumps ins Arbeitsverzeichnis `/config`, R15)
   - `--cookies-from-browser`, `--cookies`, `--netrc-location`, `--cache-dir`
   - `--output`/`--paths`/`--print-to-file`/`--download-archive`, sofern sie aus `/downloads` hinausführen
     (`--download-archive` darf zusätzlich `/config/archive.txt` sein). Pfade werden aufgelöst wie in

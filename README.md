@@ -18,6 +18,13 @@ yt-dlp documentation [here](https://github.com/yt-dlp/yt-dlp).
 > (`youtubedl_autoupdate=true`). Shell command substitution `$(...)` inside
 > `--output` in `args.conf` is no longer evaluated — use yt-dlp output
 > templates such as `%(upload_date>%Y)s` instead.
+>
+> **First images (repository owner):** `:latest` and `:v<VERSION>` are built by
+> the *Release Images* workflow, not by merging. GitHub disables scheduled
+> workflows in forks, so after the first merge open the Actions tab, enable
+> *Release Images* and run it once (*Run workflow* on `master`). Before
+> switching a container, check that the image exists:
+> `docker manifest inspect ghcr.io/jannik000/youtube-dl:latest`.
 
 # Features
 * **Easy Usage with Minimal Setup**
