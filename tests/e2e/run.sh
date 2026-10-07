@@ -50,8 +50,11 @@ new_config() {  # new_config name -> prints dir with config/ and downloads/
 }
 
 if [ -z "${E2E_SKIP_BUILD:-}" ]; then
-  echo "== Building $IMAGE"
-  docker build -t "$IMAGE" . || { echo "build failed"; exit 1; }
+  # Optional extra 'docker build' arguments, e.g.
+  # E2E_BUILD_ARGS='--build-arg YTDLP_VERSION=2026.08.19'
+  read -r -a build_args <<<"${E2E_BUILD_ARGS:-}"
+  echo "== Building $IMAGE ${E2E_BUILD_ARGS:-}"
+  docker build "${build_args[@]}" -t "$IMAGE" . || { echo "build failed"; exit 1; }
 fi
 
 ########################################################################
@@ -105,12 +108,22 @@ check "GET restart no longer allowed" \
 check "option-injection URL rejected (400)" \
   test "$(http_code -H "Authorization: Bearer $API_TOKEN" --data-urlencode 'url=--exec=touch /config/PWNED_opt' "$BASE/api/download")" = 400
 
-resp="$(curl -s -H "Authorization: Bearer $API_TOKEN" \
-  --data-urlencode "url=https://example.invalid/x';touch /config/PWNED_url;'" "$BASE/api/download")"
+# Shell metacharacters without whitespace ('${IFS}' instead of a space), so the
+# URL passes validation and really reaches yt-dlp; it must stay inert there.
+payload="https://example.invalid/x';touch\${IFS}/config/PWNED_url;'"
+resp="$(curl -s -H "Authorization: Bearer $API_TOKEN" --data-urlencode "url=$payload" "$BASE/api/download")"
 dl_id="$(sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' <<<"$resp")"
-check "API download returns an id" test -n "$dl_id"
+check "API download with shell metacharacters returns an id" test -n "$dl_id"
 check "download process finishes and logs" \
   wait_for 60 sh -c "curl -s -u '$USER_NAME:$USER_PASS' $BASE/log/download/$dl_id | grep -q 'Download process ended'"
+check "token on POST /download answers JSON (iOS shortcut)" \
+  sh -c "curl -s -H 'Authorization: Bearer $API_TOKEN' --data-urlencode 'url=https://example.invalid/t' $BASE/download | grep -q '\"id\"'"
+check "URL with surrounding whitespace accepted" \
+  sh -c "curl -s -H 'Authorization: Bearer $API_TOKEN' --data-urlencode 'url= https://example.invalid/ws ' $BASE/api/download | grep -q '\"id\"'"
+check "API docs disabled (404 even with auth)" \
+  test "$(http_code -u "$USER_NAME:$USER_PASS" "$BASE/docs")" = 404
+check "unauthenticated body is rejected before parsing (401, not 400/422)" \
+  test "$(http_code -H 'Content-Type: multipart/form-data; boundary=x' --data-binary 'not multipart' "$BASE/edit/args/save")" = 401
 
 check "saving args.conf with --exec rejected (400)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "args_new=--exec 'touch /config/PWNED_exec'" --data-urlencode "csrf_token=$csrf" "$BASE/edit/args/save")" = 400
