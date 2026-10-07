@@ -9,7 +9,6 @@ from fastapi import (BackgroundTasks, Depends, FastAPI, Form, HTTPException,
                      Request, status)
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse)
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
@@ -17,6 +16,11 @@ import webui_security
 import ytdlp_args
 
 LOG_TAIL_BYTES = 256 * 1024
+
+# Routes reachable without credentials (no data, needed before login).
+PUBLIC_PATHS = frozenset({'/favicon.ico', '/static/app.js'})
+# The only routes that accept the API token (the iOS shortcut).
+TOKEN_ROUTES = frozenset({('POST', '/download'), ('POST', '/api/download')})
 
 
 class Paths:
@@ -61,10 +65,38 @@ async def _read_file(path):
         return await f.read()
 
 
-def _validate_id(download_id):
+async def _log_tail_response(path):
+    """Serve at most the last LOG_TAIL_BYTES of a log file."""
     try:
-        uuid.UUID(download_id)
-    except (ValueError, AttributeError, TypeError):
+        async with aiofiles.open(path, 'rb') as f:
+            await f.seek(0, os.SEEK_END)
+            size = await f.tell()
+            await f.seek(max(0, size - LOG_TAIL_BYTES))
+            data = await f.read()
+        return PlainTextResponse(data.decode(errors='replace'))
+    except FileNotFoundError:
+        return PlainTextResponse('')
+    except OSError:
+        return PlainTextResponse('error reading log', status_code=500)
+
+
+def _route_path(scope):
+    """Request path relative to root_path, as Starlette's router sees it.
+    Works both behind a prefix-stripping proxy and with the prefix kept."""
+    path = scope.get('path', '')
+    root = scope.get('root_path', '')
+    if root and (path == root or path.startswith(root + '/')):
+        path = path[len(root):] or '/'
+    return path
+
+
+_UUID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+
+def _validate_id(download_id):
+    # Only the canonical form produced by str(uuid.uuid4()); uuid.UUID()
+    # alone would also accept '{...}', 'urn:uuid:...' and other spellings.
+    if not isinstance(download_id, str) or not _UUID_RE.fullmatch(download_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, 'not found')
 
 
@@ -107,14 +139,29 @@ def create_app():
     templates = Jinja2Templates(directory=f'{PATHS.app_dir}/templates')
     format_default = _read_format_default()
 
-    app = FastAPI(root_path=BASE_PATH)
+    # No interactive API docs: they would be unauthenticated extra surface.
+    app = FastAPI(root_path=BASE_PATH, docs_url=None, redoc_url=None,
+                  openapi_url=None)
     app.state.config = config
-    app.mount('/static', StaticFiles(directory=f'{PATHS.app_dir}/static'),
-              name='static')
 
     @app.middleware('http')
-    async def add_security_headers(request, call_next):
-        response = await call_next(request)
+    async def auth_gate_and_headers(request, call_next):
+        # Authenticate from the headers *before* any route runs, so request
+        # bodies of unauthenticated clients are never read or spooled. The
+        # route dependencies authenticate again (defense in depth) and decide
+        # CSRF handling.
+        path = _route_path(request.scope)
+        response = None
+        if path not in PUBLIC_PATHS:
+            allow_token = (request.method, path) in TOKEN_ROUTES
+            try:
+                webui_security.authenticate(request, config, allow_token=allow_token)
+            except HTTPException as exc:
+                response = JSONResponse({'detail': exc.detail},
+                                        status_code=exc.status_code,
+                                        headers=exc.headers)
+        if response is None:
+            response = await call_next(request)
         for header, value in webui_security.security_headers().items():
             response.headers.setdefault(header, value)
         return response
@@ -167,6 +214,13 @@ def create_app():
     async def favicon():
         return FileResponse(f'{PATHS.app_dir}/static/favicon.png')
 
+    # A plain route instead of a StaticFiles mount: a mount resolves files
+    # against root_path and 404s behind a prefix-stripping reverse proxy.
+    @app.get('/static/app.js')
+    async def app_js():
+        return FileResponse(f'{PATHS.app_dir}/static/app.js',
+                            media_type='text/javascript')
+
     @app.get('/')
     async def dashboard(request: Request, _=Depends(require_auth)):
         return templates.TemplateResponse(request, 'dashboard.html',
@@ -179,6 +233,10 @@ def create_app():
         webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
         download_id, url, format_args = await start_download(url)
         background_tasks.add_task(download_bg, url, download_id, format_args)
+        if auth_kind == 'token':
+            # API clients cannot follow the redirect to the Basic-auth status
+            # page, so answer like /api/download.
+            return JSONResponse({'id': download_id})
         return RedirectResponse(url=f'{BASE_PATH}/download/{download_id}',
                                 status_code=status.HTTP_303_SEE_OTHER)
 
@@ -202,28 +260,13 @@ def create_app():
 
     @app.get('/log/youtube-dl', response_class=PlainTextResponse)
     async def youtube_dl_log(_=Depends(require_auth)):
-        try:
-            async with aiofiles.open(PATHS.youtube_dl_log, 'rb') as f:
-                await f.seek(0, os.SEEK_END)
-                size = await f.tell()
-                await f.seek(max(0, size - LOG_TAIL_BYTES))
-                data = await f.read()
-            return PlainTextResponse(data.decode(errors='replace'))
-        except FileNotFoundError:
-            return PlainTextResponse('')
-        except OSError:
-            return PlainTextResponse('error reading log', status_code=500)
+        return await _log_tail_response(PATHS.youtube_dl_log)
 
     @app.get('/log/download/{download_id}', response_class=PlainTextResponse)
     async def download_log(download_id: str, _=Depends(require_auth)):
         _validate_id(download_id)
-        try:
-            return PlainTextResponse(
-                await _read_file(f'{PATHS.download_log_dir}/download_{download_id}.log'))
-        except FileNotFoundError:
-            return PlainTextResponse('')
-        except OSError:
-            return PlainTextResponse('error reading log', status_code=500)
+        return await _log_tail_response(
+            f'{PATHS.download_log_dir}/download_{download_id}.log')
 
     @app.post('/restart-youtube-dl')
     async def restart_youtube_dl(request: Request, auth_kind=Depends(require_auth),

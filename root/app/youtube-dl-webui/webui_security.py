@@ -132,7 +132,10 @@ def enforce_csrf(request, config, auth_kind, form_token):
 def validate_download_url(url, config):
     """Validate a user-supplied download URL. Returns the cleaned URL or raises
     HTTPException(400). Only http/https with a hostname are accepted; an
-    optional domain allowlist further restricts the host."""
+    optional domain allowlist further restricts the host. Surrounding
+    whitespace (e.g. a trailing newline from the iOS share sheet) is removed,
+    as yt-dlp itself would do."""
+    url = (url or '').strip()
     if not url or len(url) > 2048:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'invalid URL')
     if any(c.isspace() for c in url) or '\\' in url or any(ord(c) < 0x20 for c in url):
@@ -158,12 +161,14 @@ def security_headers():
 
     Scripts are served as static files ('self' only), so no inline-script
     nonce is needed. Inline styles stay allowed for the template style
-    attributes and the Semantic UI stylesheet on the CDN."""
+    attributes. The Semantic UI stylesheet on the CDN imports the Lato font
+    from Google Fonts and embeds its icon fonts as data: URIs."""
     csp = (
         "default-src 'self'; "
         "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "font-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
+        "https://fonts.googleapis.com; "
+        "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; form-action 'self'; base-uri 'none'; "
