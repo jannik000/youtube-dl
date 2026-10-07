@@ -182,9 +182,11 @@ check "abc can read but not modify /app" \
 check "abc can write its HOME" docker exec -u abc "$CA" sh -c 'touch /home/abc/.e2e && rm /home/abc/.e2e'
 check "ffmpeg, ffprobe and deno present, everything in /usr/local/bin root-owned" \
   docker exec "$CA" sh -c 'for b in ffmpeg ffprobe deno; do test -x /usr/local/bin/$b || exit 1; done; test -z "$(find /usr/local/bin -mindepth 1 ! -user root)"'
+# Read as abc: root in 'docker exec' lacks CAP_SYS_PTRACE and may not read the
+# environ of another user's process.
 # shellcheck disable=SC2016  # expanded inside the container
 check "downloader gets venv PATH and HOME=/home/abc from supervisor" \
-  docker exec "$CA" sh -c 'e="$(tr "\0" "\n" < /proc/$(supervisorctl -c /etc/supervisor/supervisord.conf pid youtube-dl)/environ)"; echo "$e" | grep -q "^PATH=/opt/venv/bin:" && echo "$e" | grep -q "^HOME=/home/abc$"'
+  docker exec -u abc "$CA" sh -c 'e="$(tr "\0" "\n" < /proc/$(supervisorctl -c /etc/supervisor/supervisord.conf pid youtube-dl)/environ)"; echo "$e" | grep -q "^PATH=/opt/venv/bin:" && echo "$e" | grep -q "^HOME=/home/abc$"'
 check "abc can run yt-dlp from the venv" docker exec -u abc "$CA" yt-dlp --version
 check "web UI runs as abc" test "$(owner_of_pid "$CA" youtube-dl-webui)" = abc
 check "downloader runs as abc" test "$(owner_of_pid "$CA" youtube-dl)" = abc
