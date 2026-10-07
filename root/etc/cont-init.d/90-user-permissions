@@ -20,16 +20,15 @@ chown -R abc:abc /config
 chown -R abc:abc /downloads
 chown -R abc:abc /var/log
 
-# abc's home must belong to abc: it is created with mode 0700 for the build-time
-# UID, so after a PUID change abc could otherwise neither enter it (and thus not
-# run the venv's python/yt-dlp) nor write caches (yt-dlp, deno) there.
-chown abc:abc /home/abc
-find /home/abc -mindepth 1 -maxdepth 1 ! -name .venv -exec chown -R abc:abc {} +
+# abc's HOME (created 0700 for the build-time UID) must follow a PUID change,
+# otherwise abc cannot use it for caches (yt-dlp, deno).
+chown -R abc:abc /home/abc
 
-# Application code (/app) and the virtualenv stay root-owned and read-only to
-# abc, so a compromised download/web process cannot overwrite the web UI,
-# scripts or yt-dlp itself. The venv only needs abc ownership when the
-# self-updater writes into it.
+# Application code (/app) and the virtualenv (/opt/venv) stay root-owned, in
+# root-owned parent directories, and read-only to abc: a compromised
+# download/web process can neither modify nor replace (rename) the web UI,
+# scripts or yt-dlp. The venv only needs abc ownership when the self-updater
+# writes into it.
 if [ "$youtubedl_autoupdate" = true ]; then
-  chown -R abc:abc /home/abc/.venv
+  chown -R abc:abc /opt/venv
 fi

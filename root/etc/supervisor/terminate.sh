@@ -1,4 +1,6 @@
 #!/bin/bash
+# Runs as root (started via supervisorctl, which abc may do): use absolute
+# paths only, never commands resolved through PATH.
 
-sleep 2s
-kill -3 "$(cat "/etc/supervisor/supervisord.pid")"
+/bin/sleep 2s
+kill -3 "$(/bin/cat "/etc/supervisor/supervisord.pid")"

@@ -1,6 +1,6 @@
 FROM debian:12-slim
 
-ENV PATH="/home/abc/.venv/bin:$PATH" \
+ENV PATH="/opt/venv/bin:$PATH" \
     PUID="911" \
     PGID="911" \
     UMASK="022" \
@@ -37,8 +37,8 @@ RUN set -x && \
         python3-venv \
         python3-pip && \
     apt clean && \
-    python3 -m venv /home/abc/.venv && \
-    /home/abc/.venv/bin/pip --no-cache-dir install -r /app/requirements.txt && \
+    python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip --no-cache-dir install -r /app/requirements.txt && \
     rm -rf \
         /var/lib/apt/lists/* \
         /tmp/*
@@ -83,7 +83,7 @@ RUN set -x && \
     else \
         spec="yt-dlp[default]" ; \
     fi && \
-    /home/abc/.venv/bin/pip --no-cache-dir install "$spec"
+    /opt/venv/bin/pip --no-cache-dir install "$spec"
 
 VOLUME /config /downloads
 

@@ -151,7 +151,12 @@ updater_absent() {
 
 check "abc has UID 1026" test "$(docker exec "$CA" id -u abc)" = 1026
 check "/app is root-owned" test "$(docker exec "$CA" stat -c %U /app/youtube-dl-webui/youtube-dl-webui.py)" = root
-check "venv is root-owned (updater off)" test "$(docker exec "$CA" stat -c %U /home/abc/.venv/pyvenv.cfg)" = root
+check "venv is root-owned (updater off)" test "$(docker exec "$CA" stat -c %U /opt/venv/pyvenv.cfg)" = root
+check "abc can use but not replace the venv" \
+  docker exec -u abc "$CA" sh -c 'test -x /opt/venv/bin/python3 && ! mv /opt/venv /opt/venv.x 2>/dev/null && ! touch /opt/venv/bin/e2e 2>/dev/null'
+# shellcheck disable=SC2016  # expanded inside the container
+check "root processes (supervisord) do not have the venv on PATH" \
+  docker exec "$CA" sh -c 'p="$(tr "\0" "\n" < /proc/$(cat /etc/supervisor/supervisord.pid)/environ | grep "^PATH=")"; [ -n "$p" ] && ! echo "$p" | grep -q venv'
 check "abc can read but not modify /app" \
   docker exec -u abc "$CA" sh -c 'f=/app/youtube-dl-webui/youtube-dl-webui.py; test -r "$f" && ! (echo x >> "$f") 2>/dev/null'
 check "abc can write its HOME" docker exec -u abc "$CA" sh -c 'touch /home/abc/.e2e && rm /home/abc/.e2e'
@@ -208,7 +213,7 @@ check "page links use the base path" \
 check "updater running when enabled" \
   sh -c "docker exec $CD supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl-updater | grep -q RUNNING"
 check "venv owned by abc when updater enabled" \
-  test "$(docker exec "$CD" stat -c %U /home/abc/.venv/pyvenv.cfg)" = abc
+  test "$(docker exec "$CD" stat -c %U /opt/venv/pyvenv.cfg)" = abc
 
 ########################################################################
 echo
