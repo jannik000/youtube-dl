@@ -237,8 +237,9 @@ check "web UI under base path (200)" \
 check "static under base path (200)" test "$(http_code "$BASE_D/yt/static/app.js")" = 200
 check "page links use the base path" \
   sh -c "curl -s -u '$USER_NAME:$USER_PASS' $BASE_D/yt/ | grep -q 'src=\"/yt/static/app.js\"'"
+# supervisor reports RUNNING only after startsecs (1 s), so wait for it.
 check "updater running when enabled" \
-  sh -c "docker exec $CD supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl-updater | grep -q RUNNING"
+  wait_for 30 sh -c "docker exec $CD supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl-updater | grep -q RUNNING"
 check "venv owned by abc when updater enabled" \
   test "$(docker exec "$CD" stat -c %U /opt/venv/pyvenv.cfg)" = abc
 
