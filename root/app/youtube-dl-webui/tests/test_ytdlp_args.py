@@ -60,6 +60,37 @@ def test_abbreviations_and_ambiguous_rejected(content):
         ytdlp_args.validate_args_conf(content)
 
 
+@pytest.mark.parametrize('content', [
+    "--ppa 'ffmpeg:-y'",                   # alias of --postprocessor-args
+    "--external-downloader ffmpeg",        # alias of --downloader
+    "--external-downloader-args 'x:-y'",   # alias of --downloader-args
+    "-ao /tmp/x",                          # -a (batch-file) in a short cluster
+    "-vU",                                 # -U (update) bundled after a flag
+    "-o/config/pre-execution.sh",          # attached short value, bad path
+])
+def test_option_aliases_and_clusters_rejected(content):
+    with pytest.raises(ytdlp_args.ArgsError):
+        ytdlp_args.validate_args_conf(content)
+
+
+@pytest.mark.parametrize('content', [
+    "-o/downloads/a.mp4",                  # 'a' inside an attached value
+    "-o '/downloads/Ua/%(title)s.%(ext)s'",  # 'U'/'a' inside a value
+    "--playlist-end -1",                   # value starting with '-'
+    "--output '-%(title)s.%(ext)s'",       # value starting with '-'
+    "-i -o '/downloads/%(title)s.%(ext)s'",
+])
+def test_values_are_not_mistaken_for_options(content):
+    ytdlp_args.validate_args_conf(content)
+
+
+def test_default_args_conf_from_repo_is_accepted():
+    path = os.path.join(os.path.dirname(__file__), '..', '..', '..',
+                        'config.default', 'args.conf')
+    with open(path) as f:
+        ytdlp_args.validate_args_conf(f.read())
+
+
 def test_alias_defining_exec_is_rejected():
     # Even unused, an alias is rejected outright.
     with pytest.raises(ytdlp_args.ArgsError):

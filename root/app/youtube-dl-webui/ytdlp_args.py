@@ -88,22 +88,94 @@ def _canonical_long_opt(parser, token):
                         f'({type(err).__name__})')
 
 
-def _check_denied_tokens(parser, tokens):
-    for tok in tokens:
-        if tok == '--' or not tok.startswith('-') or tok == '-':
-            continue
+def _iter_options(parser, tokens):
+    """Yield the optparse Option objects referenced by ``tokens``.
+
+    Follows optparse's rules for which tokens are option *values*, so a value
+    that happens to start with '-' (``--playlist-end -1``) is not mistaken for
+    an option, and the rest of a short cluster after a value-taking option
+    (``-o/downloads/a.mp4``) is treated as its value, not as more options.
+    """
+    i, n = 0, len(tokens)
+    while i < n:
+        tok = tokens[i]
+        i += 1
+        if tok == '--':
+            return  # everything after is positional
         if tok.startswith('--'):
-            canon = _canonical_long_opt(parser, tok)
-            if canon in DENIED_LONG_OPTIONS:
-                raise ArgsError(f'option {canon} is not allowed')
-        else:
-            # Short cluster like -Ua. A leading digit means a negative number.
-            cluster = tok[1:]
-            if cluster[:1].isdigit():
-                continue
-            for ch in cluster:
-                if ch in DENIED_SHORT_OPTIONS:
-                    raise ArgsError(f'option -{ch} is not allowed')
+            name, has_eq, _value = tok.partition('=')
+            opt = parser._long_opt[_canonical_long_opt(parser, name)]
+            yield opt
+            if opt.takes_value():
+                # '--opt=v' supplies the first value inline.
+                i += opt.nargs - 1 if has_eq else opt.nargs
+        elif tok.startswith('-') and tok != '-':
+            j = 1
+            while j < len(tok):
+                opt = parser._short_opt.get('-' + tok[j])
+                if opt is None:
+                    raise ArgsError(f'option -{tok[j]} is not a yt-dlp option')
+                yield opt
+                j += 1
+                if opt.takes_value():
+                    # Rest of the cluster (if any) is the first value.
+                    i += opt.nargs if j >= len(tok) else opt.nargs - 1
+                    break
+        # anything else is a positional argument (URL) and is ignored here
+
+
+def _denied_option_ids(parser):
+    """Identity set of denied Option objects. Comparing objects instead of
+    names also covers every alias of an option (e.g. --ppa for
+    --postprocessor-args), whatever spelling the user chose."""
+    ids = set()
+    for name in DENIED_LONG_OPTIONS:
+        opt = parser._long_opt.get(name)
+        if opt is not None:
+            ids.add(id(opt))
+    for ch in DENIED_SHORT_OPTIONS:
+        opt = parser._short_opt.get('-' + ch)
+        if opt is not None:
+            ids.add(id(opt))
+    return ids
+
+
+def _check_denied_tokens(parser, tokens):
+    denied = _denied_option_ids(parser)
+    for opt in _iter_options(parser, tokens):
+        if id(opt) in denied:
+            raise ArgsError(f'option {opt.get_opt_string()} is not allowed')
+
+
+def _check_values(options):
+    """Second, name-independent layer: reject dangerous *effects* in the
+    parsed options, however they were requested."""
+    def get(attr, default=None):
+        return getattr(options, attr, default)
+
+    checks = (
+        ('--exec', bool(get('exec_cmd'))),
+        ('--exec-before-download', bool(get('exec_before_dl_cmd'))),
+        ('--netrc-cmd', get('netrc_cmd') is not None),
+        ('--netrc-location', get('netrc_location') is not None),
+        ('--plugin-dirs', any(d != 'default' for d in (get('plugin_dirs') or []))),
+        ('--config-locations', bool(get('config_locations'))),
+        ('--batch-file', get('batchfile') is not None),
+        ('--load-info-json', get('load_info_filename') is not None),
+        ('--use-postprocessor', bool(get('add_postprocessors'))),
+        ('--ffmpeg-location', get('ffmpeg_location') is not None),
+        ('--downloader', bool(get('external_downloader'))),
+        ('--downloader-args', bool(get('external_downloader_args'))),
+        ('--postprocessor-args', bool(get('postprocessor_args'))),
+        ('--cookies', get('cookiefile') is not None),
+        ('--cookies-from-browser', get('cookiesfrombrowser') is not None),
+        ('--cache-dir', get('cachedir') not in (None, False)),
+        ('--enable-file-urls', bool(get('enable_file_urls'))),
+        ('--update', bool(get('update_self'))),
+    )
+    for name, is_set in checks:
+        if is_set:
+            raise ArgsError(f'option {name} is not allowed')
 
 
 def _path_skeleton(value):
@@ -188,6 +260,7 @@ def validate_tokens(tokens):
         raise ArgsError(f'yt-dlp rejected the options (exit {err.code})')
     except Exception as err:
         raise ArgsError(f'could not parse options: {err}')
+    _check_values(parsed.options)
     _check_paths(parsed.options)
 
 
