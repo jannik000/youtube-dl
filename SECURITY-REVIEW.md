@@ -29,27 +29,27 @@ Die mit „verifiziert“ markierten Befunde wurden lokal gegen den unverändert
 
 | ID | Befund | Fundstelle | Schweregrad | Status |
 | :--- | :--- | :--- | :---: | :--- |
-| W1 | Command Injection über die Download-URL | `youtube-dl-webui.py` `download_bg()` | Kritisch | offen |
-| W2 | Keine Authentifizierung der Web-UI | `youtube-dl-webui.py` (alle Routen) | Kritisch | offen |
-| W3 | CSRF auf allen zustandsändernden Endpunkten, Restart per GET | `youtube-dl-webui.py`, Templates | Hoch | offen |
-| W4 | Reflected XSS in `/download/{download_id}` | `dashboard.html` | Hoch | offen |
-| W5 | Option-Injection: URL wird als yt-dlp-Option gelesen | `download_bg()` | Hoch | offen |
-| W6 | Codeausführung über `args.conf`/`channels.txt` (yt-dlp-Optionen) | `save_args()`, `save_channels()` | Hoch | offen |
-| W7 | SSRF: beliebige Ziel-URLs | `download_url()` | Mittel | offen |
-| W8 | Log-Endpunkte: Informationsleck, ungeprüfte IDs, Volllast-Polling | `/log/*`, `dashboard.html` | Niedrig | offen |
-| W9 | Fehlende Security-Header (Clickjacking, CSP) | Web-UI | Niedrig | offen |
-| W10 | Unbegrenzte parallele Downloads, Logs in `/tmp` wachsen | `download_url()` | Niedrig | offen |
-| S1 | `eval` der `\|`-Args aus `channels.txt` | `youtube-dl.sh` | Hoch | offen |
-| S2 | Shell-Expansion von `--output`-Zeilen aus `args.conf` | `youtube-dl.sh` | Hoch | offen |
-| S3 | Env-Werte werden als Befehle ausgeführt (`if $var`) | `youtube-dl.sh`, `80-webui` | Info | offen |
-| C1 | Self-Updater lädt yt-dlp ungepinnt zur Laufzeit nach | `updater.sh` | Mittel | offen |
-| C2 | App-Code gehört dem Laufzeit-User `abc` | `90-user-permissions` | Niedrig | offen |
-| C3 | `PUID=0`/`PGID=0` lässt alles als root laufen | `90-user-permissions` | Niedrig | offen |
+| W1 | Command Injection über die Download-URL | `youtube-dl-webui.py` `download_bg()` | Kritisch | behoben |
+| W2 | Keine Authentifizierung der Web-UI | `youtube-dl-webui.py` (alle Routen) | Kritisch | behoben |
+| W3 | CSRF auf allen zustandsändernden Endpunkten, Restart per GET | `youtube-dl-webui.py`, Templates | Hoch | behoben |
+| W4 | Reflected XSS in `/download/{download_id}` | `dashboard.html` | Hoch | behoben |
+| W5 | Option-Injection: URL wird als yt-dlp-Option gelesen | `download_bg()` | Hoch | behoben |
+| W6 | Codeausführung über `args.conf`/`channels.txt` (yt-dlp-Optionen) | `save_args()`, `save_channels()` | Hoch | gemindert |
+| W7 | SSRF: beliebige Ziel-URLs | `download_url()` | Mittel | gemindert |
+| W8 | Log-Endpunkte: Informationsleck, ungeprüfte IDs, Volllast-Polling | `/log/*`, `dashboard.html` | Niedrig | behoben |
+| W9 | Fehlende Security-Header (Clickjacking, CSP) | Web-UI | Niedrig | behoben |
+| W10 | Unbegrenzte parallele Downloads, Logs in `/tmp` wachsen | `download_url()` | Niedrig | dokumentiert |
+| S1 | `eval` der `\|`-Args aus `channels.txt` | `youtube-dl.sh` | Hoch | behoben |
+| S2 | Shell-Expansion von `--output`-Zeilen aus `args.conf` | `youtube-dl.sh` | Hoch | behoben |
+| S3 | Env-Werte werden als Befehle ausgeführt (`if $var`) | `youtube-dl.sh`, `80-webui` | Info | behoben |
+| C1 | Self-Updater lädt yt-dlp ungepinnt zur Laufzeit nach | `updater.sh` | Mittel | behoben (Standard aus) |
+| C2 | App-Code gehört dem Laufzeit-User `abc` | `90-user-permissions` | Niedrig | behoben |
+| C3 | `PUID=0`/`PGID=0` lässt alles als root laufen | `90-user-permissions` | Niedrig | behoben |
 | C4 | Supervisor: Zugangsdaten, `terminate` als root | `supervisord.conf` | Info | kein Handlungsbedarf |
-| C5 | Build lädt ffmpeg/deno „latest“ ohne Prüfsumme | `Dockerfile` | Niedrig | offen |
-| D1 | Python-Abhängigkeiten ungepinnt | `requirements.txt` | Niedrig | offen |
-| G1 | CI: fremde Registry/Secrets, Drittanbieter-Action, veraltete Actions, keine `permissions` | `.github/workflows/*` | Mittel | offen |
-| G2 | Release-Tag wird ungeprüft in `sed` und Image-Tags übernommen | `release-checker.yml`, Build-Workflows | Niedrig | offen |
+| C5 | Build lädt ffmpeg/deno „latest“ ohne Prüfsumme | `Dockerfile` | Niedrig | dokumentiert |
+| D1 | Python-Abhängigkeiten ungepinnt | `requirements.txt` | Niedrig | behoben |
+| G1 | CI: fremde Registry/Secrets, Drittanbieter-Action, veraltete Actions, keine `permissions` | `.github/workflows/*` | Mittel | behoben |
+| G2 | Release-Tag wird ungeprüft in `sed` und Image-Tags übernommen | `release-checker.yml`, Build-Workflows | Niedrig | behoben |
 
 ---
 
