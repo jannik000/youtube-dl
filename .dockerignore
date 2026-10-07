@@ -1,0 +1,7 @@
+.git
+.github
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+root/app/youtube-dl-webui/tests
+*.md
