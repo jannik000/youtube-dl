@@ -12,7 +12,6 @@ ENV PATH="/home/abc/.venv/bin:$PATH" \
     youtubedl_watchlater="false" \
     youtubedl_interval="3h" \
     youtubedl_quality="1080" \
-    youtubedl_autoupdate="false" \
     OPENSSL_CONF=
 
 RUN set -x && \
@@ -72,8 +71,19 @@ RUN set -x && \
     mv $(find /tmp/deno/* -name deno) /usr/local/bin/ && \
     rm -rf /tmp/*
 
+# YTDLP_VERSION pins yt-dlp for release images; empty installs the latest.
+# AUTOUPDATE sets the default for the runtime self-updater (true for the
+# rolling 'unstable' image, false otherwise).
+ARG YTDLP_VERSION=
+ARG AUTOUPDATE=false
+ENV youtubedl_autoupdate=$AUTOUPDATE
 RUN set -x && \
-    /home/abc/.venv/bin/pip --no-cache-dir install yt-dlp[default]
+    if [ -n "$YTDLP_VERSION" ]; then \
+        spec="yt-dlp[default]==$YTDLP_VERSION" ; \
+    else \
+        spec="yt-dlp[default]" ; \
+    fi && \
+    /home/abc/.venv/bin/pip --no-cache-dir install "$spec"
 
 VOLUME /config /downloads
 
