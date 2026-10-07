@@ -107,7 +107,7 @@ Then configure the channels as explained in the [Configure youtube-dl](#configur
 | `youtubedl_debug` | `true` (`false`) | Used to enable verbose mode.
 | `youtubedl_lockfile` | `true` (`false`) | Used to enable youtubedl-running, youtubedl-completed files in downloads directory. Useful for external scripts.
 | `youtubedl_webui` | `true` (`false`) | Used to enable webui feature with the ability to manage configuration files, view logs and perform manual downloads.
-| `youtubedl_webuipath` | (`/`) | Set if you wish to change the path the webui is served from e.g. if you want to put the ui behind a path based reverse proxy.
+| `youtubedl_webuipath` | `/yt` (empty) | Set if you wish to change the path the webui is served from e.g. if you want to put the ui behind a path based reverse proxy. Must start with `/`; works whether or not the proxy strips the prefix.
 | `youtubedl_webuiport` | (`8080`) | If you need to change the webui port.
 | `youtubedl_subscriptions` | `true` (`false`) | If you want to download all your subscriptions. Authentication is required.
 | `youtubedl_watchlater` | `true` (`false`) | If you want to download your Watch Later playlist. Authentication is required.
@@ -138,7 +138,8 @@ All images are published to `ghcr.io/jannik000/youtube-dl`.
     * Built on every push to `master`, after all tests (unit, shellcheck, end-to-end) passed.
     * Has the self-updater enabled, so it tracks the newest yt-dlp from git while running.
 * **`latest`**
-    * Built when a new version of yt-dlp is released, after the tests passed against that version.
+    * Built when a new version of yt-dlp is released (or when the image for the current version is
+      missing), after the tests passed against that version. The release check runs twice a day.
     * yt-dlp is pinned to that release; update by pulling a new image.
 * **`v<VERSION>`**
     * Same build as `latest`, tagged with the yt-dlp version.

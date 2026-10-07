@@ -46,7 +46,7 @@ Die mit „verifiziert“ markierten Befunde wurden lokal gegen den unverändert
 | C2 | App-Code gehört dem Laufzeit-User `abc` | `90-user-permissions` | Niedrig | behoben |
 | C3 | `PUID=0`/`PGID=0` lässt alles als root laufen | `90-user-permissions` | Niedrig | behoben |
 | C4 | Supervisor: Zugangsdaten, `terminate` als root | `supervisord.conf` | Info | kein Handlungsbedarf |
-| C5 | Build lädt ffmpeg/deno „latest“ ohne Prüfsumme | `Dockerfile` | Niedrig | dokumentiert |
+| C5 | Build lädt ffmpeg/deno „latest“ ohne Prüfsumme | `Dockerfile` | Niedrig | gemindert |
 | D1 | Python-Abhängigkeiten ungepinnt | `requirements.txt` | Niedrig | behoben |
 | G1 | CI: fremde Registry/Secrets, Drittanbieter-Action, veraltete Actions, keine `permissions` | `.github/workflows/*` | Mittel | behoben |
 | G2 | Release-Tag wird ungeprüft in `sed` und Image-Tags übernommen | `release-checker.yml`, Build-Workflows | Niedrig | behoben |
@@ -78,6 +78,22 @@ abgedeckt:
 | R11 | CSP blockierte Semantic-UI-Schriften; `app.js` 404 hinter präfix-entfernendem Proxy; URLs mit Leerzeichen am Rand abgelehnt | Niedrig | behoben |
 | R12 | Doku beschrieb Mechanismen, die so nicht umgesetzt waren (Nonce, `tojson`, Updater in `v<VERSION>`) | Niedrig | behoben |
 | R13 | Zwei Unit-Tests bestanden aus dem falschen Grund, ein E2E-Check konnte nie bestehen, Lücken in der Abdeckung | Mittel | behoben |
+
+Eine zweite Nachprüfung (gleiches Verfahren) bestätigte, dass R1–R13 behoben sind, und fand:
+
+| ID | Befund | Schweregrad | Status |
+| :--- | :--- | :---: | :--- |
+| R14 | Validator trimmte `-o`/`--print-to-file`/`--download-archive`, yt-dlp nicht: ein führendes Leerzeichen machte den Pfad relativ (→ `/config/ /downloads/…`) | Niedrig | behoben |
+| R15 | `--write-pages` schreibt Debug-Dumps ins Arbeitsverzeichnis `/config` | Niedrig | behoben |
+| R16 | Kaputte URLs (IPv6-Klammern, NFKC-Tricks) führten zu 500 statt 400; 500er ohne Security-Header | Niedrig | behoben |
+| R17 | Zwei Regressionstests (CSP-Fonts, strikte UUID) hätten ein Zurückdrehen nicht bemerkt; E2E bewies nicht, dass yt-dlp unter Supervisor wirklich lief | Niedrig | behoben |
+| R18 | ffmpeg-Binaries gehörten uid 1001 (siehe C5) | Niedrig | behoben |
+| R19 | `release.yml` führte die neue, ungeprüfte yt-dlp-Version im selben Job aus, der Schreibrechte auf Repo und Registry hatte | Mittel | behoben |
+| R20 | Version wurde vor dem Image-Build committet; ein fehlgeschlagener Build wurde nie wiederholt | Niedrig | behoben |
+| R21 | `release.yml` ließ sich von jedem Branch aus starten und hätte `:latest` aus ungemergtem Code gebaut | Niedrig | behoben |
+| R22 | `youtubedl_webuipath=/` (bisheriger Doku-Default) erzeugte `//…`-Links | Niedrig | behoben |
+| R23 | Doku: Supervisor-Befehlsauflösung, CSP-Details (W9) | Niedrig | behoben |
+| R24 | Ein öffentliches Branch-Image (`:claude-init-ftoj5p`, Stand vor R1/R3) liegt noch in GHCR | Niedrig | **manuell löschen** |
 
 ---
 
@@ -241,10 +257,13 @@ Keine CSP. Das Semantic-UI-CSS kommt vom CDN ohne SRI.
 
 **Fix:** Middleware setzt:
 - `Content-Security-Policy`: `default-src 'self'`, `script-src 'self'` (keine Inline-Skripte),
-  Styles zusätzlich von `cdn.jsdelivr.net` und `fonts.googleapis.com`, Fonts von `cdn.jsdelivr.net`,
-  `fonts.gstatic.com` und `data:` (Semantic UI lädt Lato von Google Fonts und bettet seine
-  Icon-Fonts als `data:`-URIs ein), `frame-ancestors 'none'`, `form-action 'self'`,
-  `base-uri 'none'`, `object-src 'none'`
+  `style-src 'self' 'unsafe-inline'` (Style-Attribute in den Templates) plus `cdn.jsdelivr.net`
+  und `fonts.googleapis.com`, `font-src 'self' data:` plus `cdn.jsdelivr.net` und
+  `fonts.gstatic.com` (Semantic UI lädt Lato von Google Fonts und bettet seine Icon-Fonts als
+  `data:`-URIs ein), `img-src 'self' data:`, `connect-src 'self'`, `frame-ancestors 'none'`,
+  `form-action 'self'`, `base-uri 'none'`, `object-src 'none'`. `'unsafe-inline'` für Styles ist
+  die einzige Lockerung: Sollte je eine HTML-Injection gefunden werden, wäre CSS-Injection möglich,
+  Skript-Ausführung nicht.
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: same-origin`
 - `X-Frame-Options: DENY`
@@ -375,8 +394,19 @@ unter `/etc/supervisor` mit Modus 0700 und gehört `abc`.
 Prüfsumme heruntergeladen; das Basis-Image ist nicht per Digest gepinnt. Eine Prüfsumme von derselben
 Quelle schützt nur gegen Übertragungsfehler, nicht gegen ein kompromittiertes Release.
 
+Zusätzlich lud arm64 ffmpeg von einem privaten Server (johnvansickle.com), dessen fehlerhafte
+Antwort einen Build brach (`xz: File format not recognized`); `wget -q … | tar` erkannte den
+Download-Fehler gar nicht. Die Archive gehören außerdem uid 1001, und tar übernimmt das als root:
+Mit `PUID=1001` hätte `abc` die ffmpeg-Binaries ändern können (R18).
+
+**Fix (gemindert):** ffmpeg kommt für beide Architekturen von yt-dlp/FFmpeg-Builds (`linux64`,
+`linuxarm64`). ffmpeg und deno werden mit Wiederholungen geladen, vor dem Entpacken gegen die im
+selben Release veröffentlichte Prüfsumme geprüft (`set -eux`) und root-eigen installiert. CI baut
+zusätzlich das arm64-Image bei jedem Push. Das schützt vor kaputten oder abgeschnittenen Downloads,
+nicht vor einem kompromittierten Release.
+
 **Empfehlung (nicht umgesetzt, um Upstream-Merges nicht zu erschweren):** Versionen und SHA-256 im
-`Dockerfile` pinnen und per Dependabot/Renovate aktualisieren.
+`Dockerfile` fest pinnen und per Dependabot/Renovate aktualisieren; Basis-Image per Digest pinnen.
 
 ### D1 – Python-Abhängigkeiten ungepinnt · Niedrig
 
@@ -418,12 +448,15 @@ nicht erfasst; sie kommen beim Build in der jeweils aktuellen Version.
 - Push nach `ghcr.io/jannik000/youtube-dl` mit `GITHUB_TOKEN` (`packages: write`), keine fremden Secrets.
 - Die Drittanbieter-Action ist entfernt; stattdessen `github.ref_name` und Bash.
 - Actions auf aktuelle Versionen per Commit-SHA gepinnt, `permissions` minimal pro Workflow.
-- `release.yml` prüft zweimal täglich auf ein neues yt-dlp-Release, testet es (pytest und E2E mit
-  genau dieser Version) und committet die Version erst danach mit `GITHUB_TOKEN`. Gebaut und
-  gepusht wird im selben Job; kein PAT nötig. Ein manueller Start baut immer.
-- `ci.yml` (pytest, `pip-audit`, shellcheck, E2E) läuft für alle Pushes und Pull Requests.
-  `:unstable` wird nur auf `master` und erst nach allen Tests gepusht. Für andere Branches, PRs und
-  Dependabot werden keine Images mehr veröffentlicht (in der Nachprüfung gefunden, R8).
+- `release.yml` (nur `master`) prüft zweimal täglich auf ein neues yt-dlp-Release. Job `verify`
+  läuft nur lesend und ohne gespeicherte Zugangsdaten: Er testet die neue Version (pytest und E2E
+  mit genau dieser Version). Nur dort läuft neuer, noch ungeprüfter yt-dlp-Code (R19). Job
+  `publish` hat Schreibrechte, führt yt-dlp nicht auf dem Runner aus, baut und pusht die Images und
+  committet die Version erst danach. Fehlt das Image zur aktuellen Version, wird beim nächsten
+  Lauf gebaut, ein fehlgeschlagener Publish wird also wiederholt (R20). Kein PAT nötig.
+- `ci.yml` (pytest, `pip-audit`, shellcheck, E2E, arm64-Build) läuft für alle Pushes und Pull
+  Requests. `:unstable` wird nur auf `master` und erst nach allen Tests gepusht. Für andere
+  Branches, PRs und Dependabot werden keine Images mehr veröffentlicht (R8).
 
 ### G2 – Release-Tag ungeprüft · Niedrig
 
