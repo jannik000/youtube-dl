@@ -28,6 +28,22 @@ def test_no_shell_subprocess_in_python():
     assert not offenders, f'shell execution found in: {offenders}'
 
 
+def test_runtime_scripts_are_executable():
+    # entrypoint.sh executes these directly and aborts the container if one
+    # fails, so a missing +x bit (e.g. on a newly added init script) means
+    # the container does not start at all.
+    root = os.path.join(REPO_ROOT, 'root')
+    scripts = [os.path.join(root, 'entrypoint.sh'),
+               os.path.join(root, 'etc', 'supervisor', 'terminate.sh')]
+    init_dir = os.path.join(root, 'etc', 'cont-init.d')
+    scripts += [os.path.join(init_dir, n) for n in os.listdir(init_dir)]
+    app_dir = os.path.join(root, 'app', 'youtube-dl')
+    scripts += [os.path.join(app_dir, n) for n in os.listdir(app_dir)
+                if n.endswith('.sh')]
+    not_executable = [s for s in scripts if not os.access(s, os.X_OK)]
+    assert not not_executable, f'missing +x: {not_executable}'
+
+
 def test_shell_script_has_no_eval():
     script = os.path.join(REPO_ROOT, 'root', 'app', 'youtube-dl', 'youtube-dl.sh')
     if not os.path.exists(script):

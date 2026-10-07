@@ -117,13 +117,22 @@ check "saving args.conf with --exec rejected (400)" \
 check "saving channels.txt with valid content works (303)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "$(printf 'channels_new=# e2e\nhttps://example.invalid/plain-channel\n')" --data-urlencode "csrf_token=$csrf" "$BASE/edit/channels/save")" = 303
 
-check "downloader pass completes" \
-  wait_for 180 sh -c "docker logs $CA 2>&1 | grep -q 'execution took'"
+pass_done=false
+if wait_for 180 sh -c "docker logs $CA 2>&1 | grep -q 'execution took'"; then
+  pass_done=true; pass "downloader pass completes"
+else
+  fail "downloader pass completes"
+fi
 check "restart via POST with CSRF token (303)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" "$BASE/restart-youtube-dl")" = 303
 
+# The marker checks only mean something if the payloads were actually processed.
 for marker in PWNED_channels PWNED_args PWNED_url PWNED_opt PWNED_exec; do
-  check "no injected command ran ($marker absent)" test ! -e "$A/config/$marker"
+  if [ "$pass_done" = true ]; then
+    check "no injected command ran ($marker absent)" test ! -e "$A/config/$marker"
+  else
+    fail "no injected command ran ($marker): cannot verify, downloader pass did not complete"
+  fi
 done
 
 supervisorctl() { docker exec "$1" supervisorctl -c /etc/supervisor/supervisord.conf "${@:2}"; }
@@ -132,18 +141,24 @@ owner_of_pid() {  # owner_of_pid container program -> user owning the program's 
   pid="$(supervisorctl "$1" pid "$2")"
   docker exec "$1" stat -c %U "/proc/$pid"
 }
-not_in() { ! grep -q "$1" <<<"$2"; }
+# Negative checks must not pass just because the container is dead: each one
+# also requires a positive signal from the running container.
+updater_absent() {
+  local s
+  s="$(supervisorctl "$1" status 2>&1)" || true   # non-zero while 'terminate' is STOPPED
+  grep -q '^youtube-dl ' <<<"$s" && ! grep -q 'youtube-dl-updater' <<<"$s"
+}
 
 check "abc has UID 1026" test "$(docker exec "$CA" id -u abc)" = 1026
 check "/app is root-owned" test "$(docker exec "$CA" stat -c %U /app/youtube-dl-webui/youtube-dl-webui.py)" = root
 check "venv is root-owned (updater off)" test "$(docker exec "$CA" stat -c %U /home/abc/.venv/pyvenv.cfg)" = root
-check "abc cannot modify /app" \
-  sh -c "! docker exec -u abc $CA sh -c 'echo x >> /app/youtube-dl-webui/youtube-dl-webui.py' 2>/dev/null"
+check "abc can read but not modify /app" \
+  docker exec -u abc "$CA" sh -c 'f=/app/youtube-dl-webui/youtube-dl-webui.py; test -r "$f" && ! (echo x >> "$f") 2>/dev/null'
 check "abc can write its HOME" docker exec -u abc "$CA" sh -c 'touch /home/abc/.e2e && rm /home/abc/.e2e'
 check "abc can run yt-dlp from the venv" docker exec -u abc "$CA" yt-dlp --version
 check "web UI runs as abc" test "$(owner_of_pid "$CA" youtube-dl-webui)" = abc
 check "downloader runs as abc" test "$(owner_of_pid "$CA" youtube-dl)" = abc
-check "updater not running by default" not_in youtube-dl-updater "$(supervisorctl "$CA" status 2>&1)"
+check "updater not running by default" updater_absent "$CA"
 check "downloader RUNNING after restart" \
   wait_for 30 sh -c "docker exec $CA supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl | grep -q RUNNING"
 
@@ -158,8 +173,8 @@ docker run -d --name "$CB" -p "127.0.0.1:$((PORT + 1)):8080" \
 check "fail-closed message logged" \
   wait_for 60 sh -c "docker logs $CB 2>&1 | grep -q 'Refusing to start the'"
 sleep 5
-check "web UI not reachable" \
-  test "$(http_code "http://127.0.0.1:$((PORT + 1))/")" = 000
+check "web UI not reachable while the container runs" \
+  sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' $CB)\" = true ] && [ \"\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$((PORT + 1))/)\" = 000 ]"
 check "downloader still running" \
   sh -c "docker exec $CB supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl | grep -q RUNNING"
 
