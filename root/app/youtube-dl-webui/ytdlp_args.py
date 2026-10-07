@@ -26,6 +26,9 @@ import sys
 # that writes to the filesystem outside here is rejected.
 DOWNLOADS_DIR = '/downloads'
 ARCHIVE_EXACT = '/config/archive.txt'
+# Working directory of every yt-dlp process (the image's WORKDIR); relative
+# paths resolve against it.
+CONFIG_DIR = '/config'
 
 # Options rejected by canonical name. Each either runs a command, loads code
 # or extra config, or reads/writes outside /downloads in a way the output-path
@@ -51,10 +54,6 @@ DENIED_LONG_OPTIONS = frozenset({
 
 # Short forms of denied options (optparse allows bundling, e.g. -Ua).
 DENIED_SHORT_OPTIONS = frozenset({'a', 'U'})
-
-# Options whose values are filesystem paths and must stay under /downloads.
-# Checked on the parsed result so the limit holds however the path was set.
-_PATH_OPTION_ATTRS = ('outtmpl', 'paths', 'print_to_file', 'download_archive')
 
 
 class ArgsError(ValueError):
@@ -207,36 +206,63 @@ def _path_skeleton(value):
     return ''.join(out)
 
 
-def _ensure_within_downloads(value, allow_archive=False):
+def _resolve(value, base):
+    """Resolve a path option the way yt-dlp does, relative to ``base``.
+
+    yt-dlp strips path values, expands '~' and environment variables in them
+    (and in output templates, before field substitution), and joins relative
+    paths onto the working directory or the --paths home. Expansion depends on
+    the runtime environment, so values using it are rejected outright.
+    """
+    value = value.strip()
+    if value.startswith('~') or '$' in value:
+        raise ArgsError(f'path {value!r} must not use "~" or "$" expansion')
     skeleton = _path_skeleton(value)
     if '\x00' in skeleton:
         raise ArgsError('path contains a null byte')
-    # Reject parent-dir traversal in any form.
-    parts = skeleton.replace('\\', '/').split('/')
-    if '..' in parts:
-        raise ArgsError(f'path {value!r} must not contain ".."')
     if not os.path.isabs(skeleton):
-        # Relative paths resolve under the download process working directory;
-        # without a leading '/' and without '..' they cannot reach /config.
+        skeleton = os.path.join(base, skeleton)
+    return os.path.normpath(skeleton)
+
+
+def _require_under_downloads(value, resolved, allow_archive=False):
+    if not value.strip():
+        return  # empty template/path: yt-dlp writes nothing for it
+    if allow_archive and resolved == ARCHIVE_EXACT:
         return
-    normalized = os.path.normpath(skeleton)
-    if allow_archive and normalized == ARCHIVE_EXACT:
+    if resolved == DOWNLOADS_DIR or resolved.startswith(DOWNLOADS_DIR + '/'):
         return
-    if normalized == DOWNLOADS_DIR or normalized.startswith(DOWNLOADS_DIR + '/'):
-        return
-    raise ArgsError(f'path {value!r} must be under {DOWNLOADS_DIR}')
+    raise ArgsError(f'path {value!r} resolves to {resolved!r}, which is not '
+                    f'under {DOWNLOADS_DIR}')
 
 
 def _check_paths(options):
+    """Every file yt-dlp writes must end up under /downloads.
+
+    Both download processes run with the container WORKDIR as current
+    directory, so a relative path is resolved against CONFIG_DIR, where
+    pre-/post-execution.sh live. The --paths 'home' directory (itself resolved
+    against CONFIG_DIR) is the base for the other path types, output templates
+    and --print-to-file targets, exactly as in YoutubeDL.get_output_path().
+    """
+    paths = dict(options.paths or {})
+    home_value = paths.pop('home', None)
+    base = CONFIG_DIR
+    if home_value is not None and home_value.strip():
+        base = _resolve(home_value, CONFIG_DIR)
+        _require_under_downloads(home_value, base)
+    for directory in paths.values():
+        _require_under_downloads(directory, _resolve(directory, base))
     for templ in (options.outtmpl or {}).values():
-        _ensure_within_downloads(templ)
-    for directory in (options.paths or {}).values():
-        _ensure_within_downloads(directory)
+        _require_under_downloads(templ, _resolve(templ, base))
     for entries in (options.print_to_file or {}).values():
         for _template, filename in entries:
-            _ensure_within_downloads(filename)
+            _require_under_downloads(filename, _resolve(filename, base))
     if options.download_archive:
-        _ensure_within_downloads(options.download_archive, allow_archive=True)
+        # The archive is opened relative to the working directory, not home.
+        archive = options.download_archive
+        _require_under_downloads(archive, _resolve(archive, CONFIG_DIR),
+                                 allow_archive=True)
 
 
 def validate_tokens(tokens):

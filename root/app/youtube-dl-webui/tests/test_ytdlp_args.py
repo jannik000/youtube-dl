@@ -77,7 +77,7 @@ def test_option_aliases_and_clusters_rejected(content):
     "-o/downloads/a.mp4",                  # 'a' inside an attached value
     "-o '/downloads/Ua/%(title)s.%(ext)s'",  # 'U'/'a' inside a value
     "--playlist-end -1",                   # value starting with '-'
-    "--output '-%(title)s.%(ext)s'",       # value starting with '-'
+    "--output-na-placeholder '-na-'",      # value starting with '-'
     "-i -o '/downloads/%(title)s.%(ext)s'",
 ])
 def test_values_are_not_mistaken_for_options(content):
@@ -111,10 +111,34 @@ def test_output_outside_downloads_rejected(content):
 
 
 @pytest.mark.parametrize('content', [
+    # yt-dlp runs with cwd=/config, so relative paths land next to
+    # pre-/post-execution.sh, which youtube-dl.sh executes.
+    "-o '%(title)s.%(ext)s'",
+    "-o pre-execution.sh",
+    "--print-to-file 'touch /tmp/x' post-execution.sh",
+    "--print-to-file title 'sub/%(id)s.sh'",
+    "-P temp:tmp",                              # temp dir relative to cwd
+    "-P tmp",                                   # home relative to cwd
+    "--download-archive other.txt",             # /config/other.txt
+    "-o '~/x.%(ext)s'",                         # expanded by yt-dlp
+    "-o '$HOME/x.%(ext)s'",                     # expanded by yt-dlp
+    "-P '/downloads' -o '../config/x'",         # escapes home
+    "-P '/downloads/${X}'",
+])
+def test_paths_resolving_outside_downloads_rejected(content):
+    with pytest.raises(ytdlp_args.ArgsError):
+        ytdlp_args.validate_args_conf(content)
+
+
+@pytest.mark.parametrize('content', [
     "--output '/downloads/%(uploader)s/%(title)s.%(ext)s'",
     "--output '/downloads/sub/%(title)s.%(ext)s'",
     "--download-archive '/config/archive.txt'",  # explicitly allowed exception
-    "-o '%(title)s.%(ext)s'",                     # relative, no traversal
+    "--download-archive archive.txt",            # same file, relative to cwd
+    "-P /downloads -o '%(title)s.%(ext)s'",       # relative to the home path
+    "-P /downloads -P temp:tmp",                  # temp under home
+    "-P /downloads --print-to-file title 'titles.txt'",
+    "--output ' /downloads/%(title)s.%(ext)s'",   # yt-dlp strips the value
 ])
 def test_safe_output_paths_accepted(content):
     ytdlp_args.validate_args_conf(content)
