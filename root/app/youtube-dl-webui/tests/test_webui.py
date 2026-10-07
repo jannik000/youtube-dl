@@ -143,11 +143,16 @@ def test_restart_requires_post_and_csrf(make_client):
     'http://user:pass@youtube.com/x',       # credentials in URL
     'http://host /x',                       # whitespace
     'ftp://youtube.com/x',                  # non-http scheme
+    'https://[x',                           # urlsplit raises ValueError ...
+    'https://[::1',
+    'https://]x/',
+    'http://example.com＃@evil.com/',   # ... NFKC netloc check
+    'http://a℀b.com/',
 ])
 def test_malicious_urls_rejected(make_client, bad_url):
     client, _ = make_client()
     r = client.post('/api/download', headers=bearer(), data={'url': bad_url})
-    assert r.status_code in (400, 403), bad_url
+    assert r.status_code == 400, bad_url
 
 
 def test_download_argv_has_no_shell_and_url_after_dashdash(make_client):
@@ -180,6 +185,10 @@ def test_allowed_domains_enforced(make_client):
     'not-a-uuid',
     '{12345678-1234-5678-1234-567812345678}',      # accepted by uuid.UUID()
     'urn:uuid:12345678-1234-5678-1234-567812345678',
+    # a valid UUID followed by more: only a full match may pass
+    '12345678-1234-5678-1234-567812345678x',
+    '12345678-1234-5678-1234-567812345678%22%3E%3Cx%3E',
+    '12345678-1234-5678-1234-567812345678%0A',
 ])
 def test_bad_download_ids_rejected(make_client, bad_id):
     client, _ = make_client()
@@ -347,9 +356,35 @@ def test_security_headers_present(make_client):
     assert r.headers['X-Frame-Options'] == 'DENY'
     assert "frame-ancestors 'none'" in r.headers['Content-Security-Policy']
     assert r.headers['X-Content-Type-Options'] == 'nosniff'
-    csp = r.headers['Content-Security-Policy']
+    directives = {}
+    for part in r.headers['Content-Security-Policy'].split(';'):
+        name, *values = part.split()
+        directives[name] = values
     # Semantic UI's stylesheet imports Google Fonts and embeds data: fonts.
-    assert 'https://fonts.googleapis.com' in csp and 'data:' in csp
+    assert 'https://fonts.googleapis.com' in directives['style-src']
+    assert {'data:', 'https://fonts.gstatic.com'} <= set(directives['font-src'])
+    assert directives['script-src'] == ["'self'"]
+    assert directives['frame-ancestors'] == ["'none'"]
+
+
+def test_unexpected_error_is_500_with_security_headers(make_client):
+    client, _ = make_client()
+
+    def boom():
+        raise RuntimeError('boom')
+    client.app.add_api_route('/boom', boom)
+    r = client.get('/boom', auth=basic())
+    assert r.status_code == 500 and r.text == 'Internal Server Error'
+    assert r.headers['X-Frame-Options'] == 'DENY'
+
+
+@pytest.mark.parametrize('webuipath', ['/', '/yt/'])
+def test_trailing_slash_in_base_path(make_client, webuipath):
+    client, _ = make_client(youtubedl_webuipath=webuipath)
+    prefix = webuipath.rstrip('/')
+    html = client.get(f'{prefix}/', auth=basic()).text
+    assert f'src="{prefix}/static/app.js"' in html
+    assert 'href="//' not in html and 'action="//' not in html
 
 
 def test_security_headers_on_401(make_client):

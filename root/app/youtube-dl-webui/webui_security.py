@@ -140,8 +140,14 @@ def validate_download_url(url, config):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'invalid URL')
     if any(c.isspace() for c in url) or '\\' in url or any(ord(c) < 0x20 for c in url):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'invalid URL')
-    parts = urlsplit(url)
-    if parts.scheme not in ('http', 'https') or not parts.hostname:
+    try:
+        # Raises ValueError e.g. for an unbalanced IPv6 bracket or a netloc
+        # with characters that NFKC-normalise to URL delimiters.
+        parts = urlsplit(url)
+        hostname = parts.hostname
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'invalid URL')
+    if parts.scheme not in ('http', 'https') or not hostname:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             'only http(s) URLs are allowed')
     # Credentials in the authority (user:pass@host) are an SSRF/log-leak risk.
@@ -149,7 +155,7 @@ def validate_download_url(url, config):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             'credentials in URL are not allowed')
     if config.allowed_domains:
-        host = parts.hostname.lower()
+        host = hostname.lower()
         if not any(host == d or host.endswith('.' + d) for d in config.allowed_domains):
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 'domain not in WEBUI_ALLOWED_DOMAINS')

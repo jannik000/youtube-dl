@@ -137,6 +137,11 @@ def test_output_outside_downloads_rejected(content):
     "-o '$HOME/x.%(ext)s'",                     # expanded by yt-dlp
     "-P '/downloads' -o '../config/x'",         # escapes home
     "-P '/downloads/${X}'",
+    # yt-dlp does not strip these: a leading space makes them relative
+    "-o ' /downloads/%(title)s.%(ext)s'",
+    "--print-to-file title ' /downloads/loot'",
+    "--download-archive ' /downloads/a.txt'",
+    "--write-pages",                            # dumps pages into /config
 ])
 def test_paths_resolving_outside_downloads_rejected(content):
     with pytest.raises(ytdlp_args.ArgsError):
@@ -151,7 +156,7 @@ def test_paths_resolving_outside_downloads_rejected(content):
     "-P /downloads -o '%(title)s.%(ext)s'",       # relative to the home path
     "-P /downloads -P temp:tmp",                  # temp under home
     "-P /downloads --print-to-file title 'titles.txt'",
-    "--output ' /downloads/%(title)s.%(ext)s'",   # yt-dlp strips the value
+    "-P ' /downloads' -o '%(title)s.%(ext)s'",    # yt-dlp strips --paths
 ])
 def test_safe_output_paths_accepted(content):
     ytdlp_args.validate_args_conf(content)

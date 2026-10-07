@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -48,7 +49,8 @@ class Paths:
 
 
 PATHS = Paths()
-BASE_PATH = os.environ.get('youtubedl_webuipath', '')
+# No trailing slash: '/' or '/yt/' would turn links into '//edit/args'.
+BASE_PATH = os.environ.get('youtubedl_webuipath', '').rstrip('/')
 youtubedl_binary = 'yt-dlp'
 
 
@@ -161,7 +163,15 @@ def create_app():
                                         status_code=exc.status_code,
                                         headers=exc.headers)
         if response is None:
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except Exception:
+                # Answer unexpected errors here, so they also carry the
+                # security headers; the traceback goes to the web UI log.
+                logging.getLogger('uvicorn.error').exception(
+                    'unhandled error in %s %s', request.method, path)
+                response = PlainTextResponse('Internal Server Error',
+                                             status_code=500)
         for header, value in webui_security.security_headers().items():
             response.headers.setdefault(header, value)
         return response

@@ -130,12 +130,19 @@ check "saving args.conf with --exec rejected (400)" \
 check "saving channels.txt with valid content works (303)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "$(printf 'channels_new=# e2e\nhttps://example.invalid/plain-channel\n')" --data-urlencode "csrf_token=$csrf" "$BASE/edit/channels/save")" = 303
 
+# The pass only counts if yt-dlp itself ran under supervisor: it must report
+# its version and its own error for the unresolvable plain URL (the script
+# prints 'execution took' even when every yt-dlp call fails).
 pass_done=false
-if wait_for 180 sh -c "docker logs $CA 2>&1 | grep -q 'execution took'"; then
-  pass_done=true; pass "downloader pass completes"
+if wait_for 180 sh -c "docker logs $CA 2>&1 | grep -q 'execution took'" \
+   && docker logs "$CA" 2>&1 | grep -Eq 'yt-dlp version: [0-9]{4}\.' \
+   && docker logs "$CA" 2>&1 | grep -q 'ERROR: \[generic\] plain-channel'; then
+  pass_done=true; pass "downloader pass completes and yt-dlp really ran"
 else
-  fail "downloader pass completes"
+  fail "downloader pass completes and yt-dlp really ran"
 fi
+check "channels.txt payload reached yt-dlp as literal arguments" \
+  sh -c "docker logs $CA 2>&1 | grep -q \"invalid integer value: '1;'\""
 check "restart via POST with CSRF token (303)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" "$BASE/restart-youtube-dl")" = 303
 
@@ -173,6 +180,11 @@ check "root processes (supervisord) do not have the venv on PATH" \
 check "abc can read but not modify /app" \
   docker exec -u abc "$CA" sh -c 'f=/app/youtube-dl-webui/youtube-dl-webui.py; test -r "$f" && ! (echo x >> "$f") 2>/dev/null'
 check "abc can write its HOME" docker exec -u abc "$CA" sh -c 'touch /home/abc/.e2e && rm /home/abc/.e2e'
+check "ffmpeg, ffprobe and deno present, everything in /usr/local/bin root-owned" \
+  docker exec "$CA" sh -c 'for b in ffmpeg ffprobe deno; do test -x /usr/local/bin/$b || exit 1; done; test -z "$(find /usr/local/bin -mindepth 1 ! -user root)"'
+# shellcheck disable=SC2016  # expanded inside the container
+check "downloader gets venv PATH and HOME=/home/abc from supervisor" \
+  docker exec "$CA" sh -c 'e="$(tr "\0" "\n" < /proc/$(supervisorctl -c /etc/supervisor/supervisord.conf pid youtube-dl)/environ)"; echo "$e" | grep -q "^PATH=/opt/venv/bin:" && echo "$e" | grep -q "^HOME=/home/abc$"'
 check "abc can run yt-dlp from the venv" docker exec -u abc "$CA" yt-dlp --version
 check "web UI runs as abc" test "$(owner_of_pid "$CA" youtube-dl-webui)" = abc
 check "downloader runs as abc" test "$(owner_of_pid "$CA" youtube-dl)" = abc

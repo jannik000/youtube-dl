@@ -50,6 +50,7 @@ DENIED_LONG_OPTIONS = frozenset({
     '--cache-dir',
     '--enable-file-urls',
     '--update', '--update-to',
+    '--write-pages',  # dumps every fetched page into the cwd (/config)
 })
 
 # Short forms of denied options (optparse allows bundling, e.g. -Ua).
@@ -171,6 +172,7 @@ def _check_values(options):
         ('--cache-dir', get('cachedir') not in (None, False)),
         ('--enable-file-urls', bool(get('enable_file_urls'))),
         ('--update', bool(get('update_self'))),
+        ('--write-pages', bool(get('write_pages'))),
     )
     for name, is_set in checks:
         if is_set:
@@ -206,15 +208,19 @@ def _path_skeleton(value):
     return ''.join(out)
 
 
-def _resolve(value, base):
+def _resolve(value, base, strip=False):
     """Resolve a path option the way yt-dlp does, relative to ``base``.
 
-    yt-dlp strips path values, expands '~' and environment variables in them
-    (and in output templates, before field substitution), and joins relative
-    paths onto the working directory or the --paths home. Expansion depends on
-    the runtime environment, so values using it are rejected outright.
+    yt-dlp expands '~' and environment variables in path values (and in
+    output templates, before field substitution) and joins relative paths
+    onto the working directory or the --paths home. Expansion depends on the
+    runtime environment, so values using it are rejected outright. Only the
+    --paths values are stripped by yt-dlp (``strip=True``); output templates,
+    --print-to-file targets and the archive name keep leading whitespace,
+    which makes them relative.
     """
-    value = value.strip()
+    if strip:
+        value = value.strip()
     if value.startswith('~') or '$' in value:
         raise ArgsError(f'path {value!r} must not use "~" or "$" expansion')
     skeleton = _path_skeleton(value)
@@ -226,8 +232,6 @@ def _resolve(value, base):
 
 
 def _require_under_downloads(value, resolved, allow_archive=False):
-    if not value.strip():
-        return  # empty template/path: yt-dlp writes nothing for it
     if allow_archive and resolved == ARCHIVE_EXACT:
         return
     if resolved == DOWNLOADS_DIR or resolved.startswith(DOWNLOADS_DIR + '/'):
@@ -245,19 +249,26 @@ def _check_paths(options):
     against CONFIG_DIR) is the base for the other path types, output templates
     and --print-to-file targets, exactly as in YoutubeDL.get_output_path().
     """
+    # Empty values are skipped: yt-dlp writes nothing for an empty template
+    # (e.g. --embed-thumbnail sets 'pl_thumbnail' to '') and an empty --paths
+    # value adds nothing to the base.
     paths = dict(options.paths or {})
     home_value = paths.pop('home', None)
     base = CONFIG_DIR
     if home_value is not None and home_value.strip():
-        base = _resolve(home_value, CONFIG_DIR)
+        base = _resolve(home_value, CONFIG_DIR, strip=True)
         _require_under_downloads(home_value, base)
     for directory in paths.values():
-        _require_under_downloads(directory, _resolve(directory, base))
+        if directory.strip():
+            _require_under_downloads(directory,
+                                     _resolve(directory, base, strip=True))
     for templ in (options.outtmpl or {}).values():
-        _require_under_downloads(templ, _resolve(templ, base))
+        if templ:
+            _require_under_downloads(templ, _resolve(templ, base))
     for entries in (options.print_to_file or {}).values():
         for _template, filename in entries:
-            _require_under_downloads(filename, _resolve(filename, base))
+            if filename:
+                _require_under_downloads(filename, _resolve(filename, base))
     if options.download_archive:
         # The archive is opened relative to the working directory, not home.
         archive = options.download_archive
