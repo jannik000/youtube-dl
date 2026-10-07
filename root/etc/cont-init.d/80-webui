@@ -1,9 +1,21 @@
 #!/bin/bash
+# The youtubedl_* / WEBUI_* variables are provided by the container environment.
+# shellcheck disable=SC2154
 
-if $youtubedl_webui
-then
-  echo "[web-ui] webserver is enabled."
+if [ "$youtubedl_webui" = true ]; then
+  # Fail closed: an enabled web UI with no credentials must not start.
+  if [ -z "${WEBUI_USERNAME}${WEBUI_API_TOKEN}" ] \
+     || { [ -n "$WEBUI_USERNAME" ] && [ -z "$WEBUI_PASSWORD" ]; } \
+     || { [ -n "$WEBUI_PASSWORD" ] && [ -z "$WEBUI_USERNAME" ]; }; then
+    echo "[web-ui] ERROR: web UI is enabled but no credentials are configured."
+    echo "[web-ui] Set WEBUI_USERNAME together with WEBUI_PASSWORD (browser login)"
+    echo "[web-ui] and/or WEBUI_API_TOKEN (API/shortcut). Refusing to start the"
+    echo "[web-ui] web UI (fail closed). The downloader keeps running."
+    rm -f /etc/supervisor/conf.d/youtube-dl-webui.conf
+  else
+    echo "[web-ui] webserver is enabled."
+  fi
 else
   echo "[web-ui] webserver is disabled."
-  rm -rf /etc/supervisor/conf.d/youtube-dl-webui.conf
+  rm -f /etc/supervisor/conf.d/youtube-dl-webui.conf
 fi
