@@ -2,55 +2,21 @@
 
 {% block content %}
 <div class="ui container">
-    {% if not download_id %}
-    <div class="ui ">
-        <h3>Log:</h3>
-        <pre class="logs" id="text"></pre>
-    </div>
-
-    <script>
-        function fetchLog() {
-            fetch(`{{ base_path }}/log/youtube-dl`)
-                .then(response => response.text())
-                .then(data => {
-                    const fileContentElement = document.getElementById('text');
-                    const isScrolledToBottom = fileContentElement.scrollHeight - fileContentElement.scrollTop === fileContentElement.clientHeight;
-                    fileContentElement.textContent = data;
-                    if (isScrolledToBottom) {
-                        fileContentElement.scrollTop = fileContentElement.scrollHeight;
-                    }
-                })
-        }
-        setInterval(fetchLog, 200);
-        fetchLog();
-    </script>
-    {% endif %}
-
     {% if download_id %}
     <div class="ui segment">
         <h3>Download log:</h3>
         <pre class="logs" id="text"></pre>
     </div>
-
-    <script>
-        function fetchLog() {
-            fetch(`{{ base_path }}/log/download/{{ download_id }}`)
-                .then(response => response.text())
-                .then(data => {
-                    const fileContentElement = document.getElementById('text');
-                    const isScrolledToBottom = fileContentElement.scrollHeight - fileContentElement.scrollTop === fileContentElement.clientHeight;
-                    fileContentElement.textContent = data;
-                    if (isScrolledToBottom) {
-                        fileContentElement.scrollTop = fileContentElement.scrollHeight;
-                    }
-                })
-        }
-        setInterval(fetchLog, 200);
-        fetchLog();
-    </script>
+    <div id="log-config" data-base-path="{{ base_path }}" data-download-id="{{ download_id }}"></div>
+    {% else %}
+    <div class="ui ">
+        <h3>Log:</h3>
+        <pre class="logs" id="text"></pre>
+    </div>
+    <div id="log-config" data-base-path="{{ base_path }}" data-download-id=""></div>
     {% endif %}
-
 </div>
+<script src="{{ base_path }}/static/app.js"></script>
 <style>
     .logs {
         white-space: pre-wrap;

@@ -3,13 +3,18 @@
 {% block content %}
 <div class="ui container">
     <form method="post" action="{{ base_path }}/edit/args/save">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <h2 class="ui header">Args.conf</h2>
+        {% if readonly %}
+        <div class="ui warning message">Configuration editing is disabled (WEBUI_READONLY). This file is read-only.</div>
+        {% endif %}
         <div class="ui form">
             <div class="field">
-                <textarea name="args_new" rows="30" style="width:100%;font-family:Courier New, monospace">{% for line in args %}{{ line }}{% endfor %}</textarea>
+                <textarea name="args_new" rows="30"{% if readonly %} readonly{% endif %}
+                    style="width:100%;font-family:Courier New, monospace">{% for line in args %}{{ line }}{% endfor %}</textarea>
             </div>
             <div class="field">
-                <input type="submit" value="Save" class="ui primary button" />
+                <input type="submit" value="Save" class="ui primary button"{% if readonly %} disabled{% endif %} />
             </div>
         </div>
     </form>

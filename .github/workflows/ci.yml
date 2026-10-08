@@ -1,0 +1,160 @@
+name: CI
+
+# Tests every push and pull request. On master, the rolling ':unstable' image
+# is published only after all test jobs passed. No images are published for
+# other branches or pull requests.
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # The validator relies on yt-dlp internals: test against the
+          # yt-dlp version the release images are pinned to.
+          pip install -r root/app/requirements.txt "yt-dlp[default]==$(cat release-versions/latest.txt)"
+          pip install pytest httpx pip-audit
+
+      - name: Run tests
+        run: pytest -q root/app/youtube-dl-webui/tests
+
+      - name: Audit pinned dependencies for known CVEs
+        run: pip-audit -r root/app/requirements.txt --strict
+
+  e2e:
+    # Builds the real image (amd64) and tests running containers: auth, CSRF,
+    # injection payloads, fail-closed start, PUID handling, file ownership.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run end-to-end tests
+        run: bash tests/e2e/run.sh
+
+  build-arm64:
+    # The e2e job builds amd64 only; make sure the arm64 image (QEMU) builds
+    # too before anything is published. Nothing is pushed here.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Build arm64 image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          push: false
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck --severity=warning \
+            root/entrypoint.sh \
+            root/app/youtube-dl/*.sh \
+            root/etc/cont-init.d/* \
+            root/etc/supervisor/terminate.sh \
+            tests/e2e/run.sh
+
+  publish-unstable:
+    # Rolling image with the self-updater enabled (yt-dlp from git), so it
+    # tracks the newest yt-dlp while running.
+    needs: [test, e2e, build-arm64, shellcheck]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read pinned yt-dlp version
+        id: ver
+        run: echo "version=$(cat release-versions/latest.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure rolling self-updater (git)
+        run: |
+          set -euo pipefail
+          # Install yt-dlp from git in the updater, and ensure git is present.
+          sed -i -E \
+            's![^ ]*pip .*install .*yt-dlp\[default\].*!pip --no-cache-dir --quiet install --upgrade --force-reinstall --no-deps git+https://github.com/yt-dlp/yt-dlp.git!' \
+            root/app/youtube-dl/updater.sh
+          sed -i -E 's!(python3-pip)!\1 \\\n        git!' Dockerfile
+          grep -q 'git+https://github.com/yt-dlp/yt-dlp.git' root/app/youtube-dl/updater.sh
+          grep -q '^ *git && ' Dockerfile
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1  # v4.4.0
+        with:
+          cache-image: false  # no privileged image from the shared cache here
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            YTDLP_VERSION=${{ steps.ver.outputs.version }}
+            AUTOUPDATE=true
+          tags: ${{ env.IMAGE }}:unstable

@@ -10,7 +10,10 @@
 <body>
     <div class="ui inverted menu">
         <a href="{{ base_path }}/" class="item"><i class="home icon"></i>Dashboard</a>
-        <a href="{{ base_path }}/restart-youtube-dl" class="item"><i class="sync alternate icon"></i>Restart youtube-dl</a>
+        <form class="item" method="post" action="{{ base_path }}/restart-youtube-dl" style="padding:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="ui inverted button" style="margin:7px;"><i class="sync alternate icon"></i>Restart youtube-dl</button>
+        </form>
         <div class="ui simple dropdown item">Edit<i class="dropdown icon"></i>
             <div class="menu">
                 <a class="item" href="{{ base_path }}/edit/args">Args</a>
@@ -19,6 +22,7 @@
             </div>
         </div>
         <form class="item" method="post" action="{{ base_path }}/download"  style="flex-grow:1;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="ui action input">
                 <input type="text" name="url" placeholder="URL">
                 <button class="ui teal right labeled icon button">
@@ -28,10 +32,8 @@
             </div>
         </form>
         <div class="right menu">
-            <a href="https://github.com/Jeeaaasus/youtube-dl" class=" item"><i
-                    class="github icon"></i>Jeeaaasus</a>
-            <a href="https://hub.docker.com/r/jeeaaasustest/youtube-dl/" class=" item"><i
-                    class="docker icon"></i>youtube-dl</a>
+            <a href="https://github.com/jannik000/youtube-dl" class=" item"><i
+                    class="github icon"></i>youtube-dl</a>
         </div>
     </div>
 

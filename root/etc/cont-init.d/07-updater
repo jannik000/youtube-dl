@@ -1,0 +1,15 @@
+#!/bin/bash
+# The youtubedl_* variables are provided by the container environment.
+# shellcheck disable=SC2154
+
+# The self-updater installs the newest yt-dlp from PyPI into the running
+# container every few hours (ungepinnt). That is a supply-chain risk, so it
+# is opt-in. With it off (default), update yt-dlp by pulling a new image;
+# images are rebuilt automatically on each yt-dlp release.
+if [ "$youtubedl_autoupdate" = true ]; then
+  echo "[updater] yt-dlp auto-update is enabled."
+else
+  echo "[updater] yt-dlp auto-update is disabled (default)."
+  echo "[updater] Set youtubedl_autoupdate=true to enable, or pull a new image to update."
+  rm -f /etc/supervisor/conf.d/youtube-dl-updater.conf
+fi
