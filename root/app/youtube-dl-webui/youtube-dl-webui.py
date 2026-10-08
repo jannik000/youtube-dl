@@ -1,4 +1,6 @@
 import asyncio
+import codecs
+import contextlib
 import logging
 import os
 import re
@@ -17,6 +19,7 @@ import webui_security
 import ytdlp_args
 
 LOG_TAIL_BYTES = 256 * 1024
+OUTPUT_CHUNK_BYTES = 64 * 1024
 
 # Routes reachable without credentials (no data, needed before login).
 PUBLIC_PATHS = frozenset({'/favicon.ico', '/static/app.js'})
@@ -111,20 +114,31 @@ async def download_bg(url, download_id, format_args):
     argv = [youtubedl_binary, '--no-playlist-reverse', '--playlist-end', '-1',
             '--config-location', PATHS.args_file, *format_args, '--', url]
     log_file = await aiofiles.open(log_file_path, 'w')
+    process = None
     try:
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        async for line in process.stdout:
-            await log_file.write(line.decode(errors='replace'))
+        # Copy chunks, not lines: progress output without --newline is one
+        # endless line, and reading lines fails beyond 64 KiB. The pipe must
+        # be drained to the end, or yt-dlp blocks on a full pipe.
+        decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
+        while chunk := await process.stdout.read(OUTPUT_CHUNK_BYTES):
+            await log_file.write(decoder.decode(chunk))
             await log_file.flush()
+        await log_file.write(decoder.decode(b'', final=True))
         await process.wait()
         await log_file.write('[youtube-dl] Download process ended\n')
     except Exception as err:
         await log_file.write(f'Error: {err}\n')
     finally:
+        # After an error or a cancellation, leave no yt-dlp process behind.
+        if process is not None and process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
         await log_file.close()
 
 
