@@ -38,6 +38,13 @@ log_has() {  # log_has container grep-args...
   grep -q "$@" <<<"$logs"
 }
 
+log_count() {  # log_count container grep-args... -> number of matching lines
+  local logs
+  logs="$(docker logs "$1" 2>&1)" || return 1
+  shift
+  grep -c "$@" <<<"$logs"
+}
+
 wait_for() {  # wait_for seconds command...
   local timeout="$1"; shift
   for _ in $(seq 1 "$timeout"); do
@@ -177,6 +184,18 @@ updater_absent() {
   s="$(supervisorctl "$1" status 2>&1)" || true   # non-zero while 'terminate' is STOPPED
   grep -q '^youtube-dl ' <<<"$s" && ! grep -q 'youtube-dl-updater' <<<"$s"
 }
+count_cmdline() {  # count_cmdline container 'argv joined by spaces' -> count
+  # procps is not in the image, so scan /proc. The whole argv is compared, so
+  # the outer 'bash -c "youtube-dl.sh ... | tee ..."' (and this sh) never match.
+  # shellcheck disable=SC2016  # expanded inside the container
+  docker exec "$1" sh -c 'n=0; for f in /proc/[0-9]*/cmdline; do
+      [ "$(tr "\0" " " 2>/dev/null < "$f")" = "$1 " ] && n=$((n + 1)); done
+    echo "$n"' sh "$2"
+}
+one_downloader_pass() {  # exactly one youtube-dl.sh and one tee writing its log
+  [ "$(count_cmdline "$1" '/bin/bash /app/youtube-dl/youtube-dl.sh')" = 1 ] &&
+    [ "$(count_cmdline "$1" 'tee /var/log/youtube-dl/youtube-dl.log')" = 1 ]
+}
 
 check "abc has UID 1026" test "$(docker exec "$CA" id -u abc)" = 1026
 check "/app is root-owned" test "$(docker exec "$CA" stat -c %U /app/youtube-dl-webui/youtube-dl-webui.py)" = root
@@ -202,6 +221,10 @@ check "downloader runs as abc" test "$(owner_of_pid "$CA" youtube-dl)" = abc
 check "updater not running by default" updater_absent "$CA"
 check "downloader RUNNING after restart" \
   wait_for 30 sh -c "docker exec $CA supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl | grep -q RUNNING"
+# The restart must stop the old pass's whole process group (stopasgroup), not
+# only 'bash -c': its youtube-dl.sh and tee would keep running next to the new.
+check "restart leaves exactly one downloader pass (old process group gone)" \
+  wait_for 30 one_downloader_pass "$CA"
 
 ########################################################################
 echo "== Scenario B: web UI enabled without credentials (fail closed)"
@@ -251,6 +274,22 @@ check "updater running when enabled" \
   wait_for 30 sh -c "docker exec $CD supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl-updater | grep -q RUNNING"
 check "venv owned by abc when updater enabled" \
   test "$(docker exec "$CD" stat -c %U /opt/venv/pyvenv.cfg)" = abc
+
+########################################################################
+echo "== Scenario E: youtubedl_interval=false runs one pass, then the container exits"
+E="$(new_config e)"
+CE=e2e-e
+CONTAINERS+=("$CE")
+# Default config: channels.txt has no URLs, so no download is attempted.
+docker run -d --name "$CE" -e youtubedl_interval=false \
+  -v "$E/config:/config" -v "$E/downloads:/downloads" "$IMAGE" >/dev/null
+check "container exits by itself" \
+  wait_for 120 sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' $CE)\" = false ]"
+check "exit announced in the log" log_has "$CE" 'container will now exit'
+# On exit, autorestart must not have begun a second pass before the shutdown.
+check "exactly one pass ran" test "$(log_count "$CE" 'starting execution')" = 1
+# 'terminate' sends SIGQUIT; supervisord then stops all programs and exits 0.
+check "exit code 0" test "$(docker inspect -f '{{.State.ExitCode}}' "$CE")" = 0
 
 ########################################################################
 echo

@@ -124,6 +124,12 @@ then
   fi
 else
   echo "youtubedl_interval is set to 'false', container will now exit."
-  supervisorctl stop all
+  # 'terminate' sends SIGQUIT to supervisord, which then stops every program
+  # and exits with 0. Never stop programs from here: this script belongs to
+  # the youtube-dl process group, which supervisor stops as a whole, so
+  # 'supervisorctl stop all' would end it before 'terminate' is started.
+  # Wait to be stopped instead of exiting: on exit, autorestart would begin
+  # another pass before the shutdown.
   supervisorctl start terminate
+  sleep infinity
 fi
