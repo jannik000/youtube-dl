@@ -789,6 +789,11 @@ def retry_url(item):
 
 
 def disk_usage(path):
+    """Free and total bytes of the file system holding ``path``.
+
+    The free space is rounded down to 1/1000 of the total (at least 1 MiB):
+    any write on the disk changes the exact value, which would change the
+    ETag of every status answer."""
     try:
         st = os.statvfs(path)
     except OSError:
@@ -797,7 +802,8 @@ def disk_usage(path):
     free = st.f_bavail * st.f_frsize
     if total <= 0:
         return None
-    return {'free': free, 'total': total,
+    step = max(1024 * 1024, total // 1000)
+    return {'free': free // step * step, 'total': total,
             'low': free < LOW_DISK_BYTES or free < total * LOW_DISK_RATIO}
 
 

@@ -689,10 +689,25 @@ def test_retry_url(item, url):
     assert dashboard.retry_url(item) == url
 
 
-def test_disk_usage(env, tmp_path):
+def test_disk_usage(env, tmp_path, monkeypatch):
     disk = env.dash().status()['disk']
     assert disk['total'] > 0 and 0 <= disk['free'] <= disk['total']
     assert dashboard.disk_usage(str(tmp_path / 'missing')) is None
+
+    class Fs:
+        f_frsize = 4096
+        f_blocks = 2_000_000_000 // 4096          # 2 GB
+        f_bavail = 1_500_000_123 // 4096
+    monkeypatch.setattr(dashboard.os, 'statvfs', lambda path: Fs)
+    disk = dashboard.disk_usage('/downloads')
+    step = Fs.f_blocks * 4096 // 1000
+    free = Fs.f_bavail * 4096
+    assert disk['free'] % step == 0 and free - step < disk['free'] <= free
+    assert disk['low'] is True                    # below 20 GB
+    Fs.f_blocks, Fs.f_bavail = 10 ** 12 // 4096, 4 * 10 ** 10 // 4096
+    assert dashboard.disk_usage('/downloads')['low'] is True   # 4 % free
+    Fs.f_bavail = 6 * 10 ** 10 // 4096
+    assert dashboard.disk_usage('/downloads')['low'] is False
 
 
 def test_etag_matches():
