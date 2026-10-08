@@ -80,12 +80,6 @@ def make_client(webui_env):
     captured = {}
 
     class _FakeStream:
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            raise StopAsyncIteration
-
         async def read(self, n=-1):
             return b''
 

@@ -254,8 +254,10 @@ def test_cancel_with_unread_output_does_not_hang(
 
 def test_utf8_split_across_reads_is_not_mangled(
         webui_module, webui_env, monkeypatch):
-    # U+00FC (2 bytes) starts at offset 65535: a 64 KiB read splits it.
-    data = b'a' * 65535 + '\u00fc'.encode() + b' invalid:\xff\n'
+    # U+00FC (2 bytes) starts at offset 65535: a 64 KiB read splits it. The
+    # output ends inside a sequence, which the final flush must not drop.
+    data = (b'a' * 65535 + '\u00fc'.encode() + b' invalid:\xff\n'
+            + b'cut:' + '\u00fc'.encode()[:1])
 
     class FakeProcess:
         returncode = None
@@ -278,4 +280,5 @@ def test_utf8_split_across_reads_is_not_mangled(
 
     monkeypatch.setattr(webui_module.asyncio, 'create_subprocess_exec', fake_exec)
     asyncio.run(webui_module.download_bg(URL, DOWNLOAD_ID, []))
-    assert _log(webui_env) == ('a' * 65535 + '\u00fc invalid:\ufffd\n' + ENDED)
+    assert _log(webui_env) == ('a' * 65535 + '\u00fc invalid:\ufffd\n'
+                               + 'cut:\ufffd' + ENDED)
