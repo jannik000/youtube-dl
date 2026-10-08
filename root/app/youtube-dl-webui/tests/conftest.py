@@ -31,6 +31,14 @@ def _load_module():
     return module
 
 
+def _redirect_paths(module, env):
+    module.PATHS.app_dir = APP_DIR
+    module.PATHS.config_dir = env['config_dir']
+    module.PATHS.download_log_dir = env['tmp_dir']
+    module.PATHS.youtube_dl_log = os.path.join(env['log_dir'], 'youtube-dl.log')
+    module.PATHS.format_file = env['format_file']
+
+
 @pytest.fixture
 def webui_env(tmp_path, monkeypatch):
     """Create a temp config tree and point the module's PATHS at it."""
@@ -72,18 +80,21 @@ def make_client(webui_env):
     captured = {}
 
     class _FakeStream:
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            raise StopAsyncIteration
+        async def read(self, n=-1):
+            return b''
 
     class _FakeProc:
         def __init__(self):
             self.stdout = _FakeStream()
+            self.returncode = None
 
         async def wait(self):
+            self.returncode = 0
             return 0
+
+        @property
+        def pid(self):   # only needed to kill it, and it has finished
+            raise AssertionError('a finished process must not be killed')
 
     async def _fake_exec(*argv, **kwargs):
         captured['argv'] = list(argv)
@@ -94,12 +105,7 @@ def make_client(webui_env):
         for key, value in env.items():
             mp.setenv(key, value)
         module = _load_module()
-        module.PATHS.app_dir = APP_DIR
-        module.PATHS.config_dir = webui_env['config_dir']
-        module.PATHS.download_log_dir = webui_env['tmp_dir']
-        module.PATHS.youtube_dl_log = os.path.join(webui_env['log_dir'],
-                                                   'youtube-dl.log')
-        module.PATHS.format_file = webui_env['format_file']
+        _redirect_paths(module, webui_env)
         mp.setattr(module.asyncio, 'create_subprocess_exec', _fake_exec)
         app = module.create_app()
         client = TestClient(app)
@@ -108,6 +114,15 @@ def make_client(webui_env):
         return client, captured
 
     return _factory
+
+
+@pytest.fixture
+def webui_module(webui_env):
+    """The module with PATHS redirected, real subprocesses and no app (for
+    tests of module-level functions such as download_bg)."""
+    module = _load_module()
+    _redirect_paths(module, webui_env)
+    return module
 
 
 def basic(username=USERNAME, password=PASSWORD):
