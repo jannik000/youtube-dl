@@ -196,6 +196,12 @@ one_downloader_pass() {  # exactly one youtube-dl.sh and one tee writing its log
   [ "$(count_cmdline "$1" '/bin/bash /app/youtube-dl/youtube-dl.sh')" = 1 ] &&
     [ "$(count_cmdline "$1" 'tee /var/log/youtube-dl/youtube-dl.log')" = 1 ]
 }
+downloader_spawns() {  # downloader_spawns container -> times supervisord started it
+  # supervisord (nodaemon) logs to the container's stdout; the closing quote
+  # keeps youtube-dl-webui and youtube-dl-updater out of the count.
+  log_count "$1" "spawned: 'youtube-dl'"
+}
+downloader_restarted() { [ "$(downloader_spawns "$1")" -ge 2 ]; }
 
 check "abc has UID 1026" test "$(docker exec "$CA" id -u abc)" = 1026
 check "/app is root-owned" test "$(docker exec "$CA" stat -c %U /app/youtube-dl-webui/youtube-dl-webui.py)" = root
@@ -219,6 +225,9 @@ check "abc can run yt-dlp from the venv" docker exec -u abc "$CA" yt-dlp --versi
 check "web UI runs as abc" test "$(owner_of_pid "$CA" youtube-dl-webui)" = abc
 check "downloader runs as abc" test "$(owner_of_pid "$CA" youtube-dl)" = abc
 check "updater not running by default" updater_absent "$CA"
+# POST /restart-youtube-dl answers 303 whatever supervisorctl does, so require
+# that supervisord really started the downloader a second time.
+check "restart really restarted the downloader" wait_for 30 downloader_restarted "$CA"
 check "downloader RUNNING after restart" \
   wait_for 30 sh -c "docker exec $CA supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl | grep -q RUNNING"
 # The restart must stop the old pass's whole process group (stopasgroup), not
@@ -287,9 +296,14 @@ check "container exits by itself" \
   wait_for 120 sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' $CE)\" = false ]"
 check "exit announced in the log" log_has "$CE" 'container will now exit'
 # On exit, autorestart must not have begun a second pass before the shutdown.
-check "exactly one pass ran" test "$(log_count "$CE" 'starting execution')" = 1
+# Count supervisord's spawns: whether a second pass gets as far as printing
+# 'starting execution' before the shutdown stops it is a race.
+check "exactly one pass ran (one spawn, one start)" \
+  test "$(downloader_spawns "$CE") $(log_count "$CE" 'starting execution')" = '1 1'
 # 'terminate' sends SIGQUIT; supervisord then stops all programs and exits 0.
-check "exit code 0" test "$(docker inspect -f '{{.State.ExitCode}}' "$CE")" = 0
+# Docker reports exit code 0 for a running container too, so check both.
+check "exited with code 0" \
+  test "$(docker inspect -f '{{.State.Running}} {{.State.ExitCode}}' "$CE")" = 'false 0'
 
 ########################################################################
 echo
