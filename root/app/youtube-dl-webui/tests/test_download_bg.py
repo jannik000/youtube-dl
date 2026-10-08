@@ -1,7 +1,9 @@
 """download_bg(): copying yt-dlp's output to the log and reaping the process.
 
 The real tests run a small Python child in place of yt-dlp: a shell wrapper
-named as the module's yt-dlp binary execs it with download_bg()'s argv.
+named as the module's yt-dlp binary execs it with download_bg()'s argv. They
+run on asyncio's default loop and on uvloop, the loop uvicorn[standard] picks
+in the image.
 """
 
 import asyncio
@@ -10,6 +12,7 @@ import os
 import shlex
 import signal
 import sys
+import types
 
 import pytest
 
@@ -19,6 +22,7 @@ ENDED = '[youtube-dl] Download process ended\n'
 # Far beyond asyncio's 64 KiB StreamReader line limit, and more than the pipe
 # and reader buffers hold, so a reader that gives up leaves the child blocked.
 LONG = 1024 * 1024
+LOOPS = ['asyncio', 'uvloop']
 
 # yt-dlp progress without --newline (or a long --print): one huge "line".
 LONG_LINE_CHILD = f'''
@@ -33,6 +37,21 @@ out.flush()
 SLEEPING_CHILD = '''
 import sys, time
 print('started', flush=True)
+time.sleep(60)
+'''
+
+# Like yt-dlp running ffmpeg: the grandchild inherits the stdout pipe.
+GRANDCHILD_CHILD = '''
+import subprocess, sys, time
+gc = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+print('grandchild', gc.pid, flush=True)
+time.sleep(60)
+'''
+
+FLOOD_CHILD = f'''
+import sys, time
+sys.stdout.buffer.write(b'y\\n' * {LONG})
+sys.stdout.flush()
 time.sleep(60)
 '''
 
@@ -54,6 +73,22 @@ def _log(webui_env):
         return f.read()
 
 
+def _run(loop, main):
+    factory = None
+    if loop == 'uvloop':
+        factory = pytest.importorskip('uvloop').new_event_loop
+    with asyncio.Runner(loop_factory=factory) as runner:
+        return runner.run(main())
+
+
+def _running(pid):
+    try:
+        with open(f'/proc/{pid}/stat') as f:
+            return f.read().rsplit(')', 1)[1].split()[0] not in ('Z', 'X')
+    except FileNotFoundError:
+        return False
+
+
 @pytest.fixture
 def spawned(webui_module, monkeypatch):
     """Records the processes download_bg() starts (real subprocesses)."""
@@ -70,16 +105,34 @@ def spawned(webui_module, monkeypatch):
 
 
 async def _leave_nothing_behind(procs):
-    # Test cleanup, so a failing run does not leave a blocked child behind.
+    # Test cleanup, so a failing run leaves no blocked child behind, and
+    # fails instead of hanging (see download_bg() on draining before wait()).
+    async def reap(proc):
+        while await proc.stdout.read(65536):
+            pass
+        await proc.wait()
+
     for proc in procs:
         if proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
                 proc.kill()
-            await proc.wait()
+            await asyncio.wait_for(reap(proc), 10)
 
 
+async def _wait_for_log(webui_env, text):
+    for _ in range(200):
+        await asyncio.sleep(0.05)
+        with contextlib.suppress(FileNotFoundError):
+            if text in _log(webui_env):
+                return _log(webui_env)
+    pytest.fail(f'{text!r} never reached the log')
+
+
+@pytest.mark.parametrize('loop', LOOPS)
 def test_long_output_line_is_copied_and_process_reaped(
-        webui_module, webui_env, spawned, tmp_path):
+        webui_module, webui_env, spawned, tmp_path, loop):
     webui_module.youtubedl_binary = _fake_ytdlp(tmp_path, LONG_LINE_CHILD)
 
     async def run():
@@ -90,7 +143,7 @@ def test_long_output_line_is_copied_and_process_reaped(
         finally:
             await _leave_nothing_behind(spawned)
 
-    returncode = asyncio.run(run())
+    returncode = _run(loop, run)
     assert returncode == 0   # the output was drained and the process awaited
     log = _log(webui_env)
     assert 'Error' not in log
@@ -100,20 +153,16 @@ def test_long_output_line_is_copied_and_process_reaped(
     assert log.endswith(ENDED)
 
 
+@pytest.mark.parametrize('loop', LOOPS)
 def test_cancel_kills_and_reaps_the_process(
-        webui_module, webui_env, spawned, tmp_path):
+        webui_module, webui_env, spawned, tmp_path, loop):
     webui_module.youtubedl_binary = _fake_ytdlp(tmp_path, SLEEPING_CHILD)
 
     async def run():
         task = asyncio.create_task(
             webui_module.download_bg(URL, DOWNLOAD_ID, []))
         try:
-            for _ in range(200):   # until the child's output reached the log
-                await asyncio.sleep(0.05)
-                if spawned and 'started' in _log(webui_env):
-                    break
-            else:
-                pytest.fail('the child never wrote to the log')
+            await _wait_for_log(webui_env, 'started')
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, 10)
@@ -121,10 +170,86 @@ def test_cancel_kills_and_reaps_the_process(
         finally:
             await _leave_nothing_behind(spawned)
 
-    returncode, pid = asyncio.run(run())
+    returncode, pid = _run(loop, run)
     assert returncode == -signal.SIGKILL   # killed by download_bg() and reaped
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+@pytest.mark.parametrize('loop', LOOPS)
+def test_cancel_kills_children_sharing_the_output(
+        webui_module, webui_env, spawned, tmp_path, loop):
+    # Killing yt-dlp alone would leave the grandchild running, and it holds
+    # the pipe open, so draining it would never end.
+    webui_module.youtubedl_binary = _fake_ytdlp(tmp_path, GRANDCHILD_CHILD)
+    grandchild = []
+
+    async def run():
+        task = asyncio.create_task(
+            webui_module.download_bg(URL, DOWNLOAD_ID, []))
+        try:
+            log = await _wait_for_log(webui_env, '\n')
+            grandchild.append(int(log.split()[1]))
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 10)
+            return spawned[0].returncode, _running(grandchild[0])
+        finally:
+            await _leave_nothing_behind(spawned)
+            for pid in grandchild:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+
+    returncode, grandchild_running = _run(loop, run)
+    assert returncode == -signal.SIGKILL
+    assert not grandchild_running
+
+
+@pytest.mark.parametrize('loop', LOOPS)
+def test_cancel_with_unread_output_does_not_hang(
+        webui_module, webui_env, spawned, tmp_path, monkeypatch, loop):
+    # The log write blocks, so the reader buffers yt-dlp's output until the
+    # loop pauses the pipe. Before Python 3.13, asyncio's wait() would then
+    # never return unless the cleanup drains the pipe first.
+    webui_module.youtubedl_binary = _fake_ytdlp(tmp_path, FLOOD_CHILD)
+    writing = []
+
+    class StuckLog:
+        async def write(self, text):
+            writing.append(True)
+            await asyncio.Event().wait()
+
+        async def flush(self):
+            pass
+
+        async def close(self):
+            pass
+
+    async def stuck_open(*args, **kwargs):
+        return StuckLog()
+
+    monkeypatch.setattr(webui_module, 'aiofiles',
+                        types.SimpleNamespace(open=stuck_open))
+
+    async def run():
+        task = asyncio.create_task(
+            webui_module.download_bg(URL, DOWNLOAD_ID, []))
+        try:
+            for _ in range(200):
+                await asyncio.sleep(0.05)
+                if writing:
+                    break
+            else:
+                pytest.fail('download_bg() never wrote to the log')
+            await asyncio.sleep(0.5)   # the reader fills up and pauses
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 10)
+            return spawned[0].returncode
+        finally:
+            await _leave_nothing_behind(spawned)
+
+    assert _run(loop, run) == -signal.SIGKILL
 
 
 def test_utf8_split_across_reads_is_not_mangled(
@@ -144,7 +269,8 @@ def test_utf8_split_across_reads_is_not_mangled(
             self.returncode = 0
             return 0
 
-        def kill(self):
+        @property
+        def pid(self):   # only needed to kill it, and it has finished
             raise AssertionError('a finished process must not be killed')
 
     async def fake_exec(*argv, **kwargs):

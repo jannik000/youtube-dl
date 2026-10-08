@@ -4,6 +4,7 @@ import contextlib
 import logging
 import os
 import re
+import signal
 import sys
 import uuid
 
@@ -116,10 +117,13 @@ async def download_bg(url, download_id, format_args):
     log_file = await aiofiles.open(log_file_path, 'w')
     process = None
     try:
+        # Own process group (pgid = pid), so cleanup reaches yt-dlp's
+        # children too (ffmpeg, external downloaders share its stdout).
         process = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
         )
         # Copy chunks, not lines: progress output without --newline is one
         # endless line, and reading lines fails beyond 64 KiB. The pipe must
@@ -134,10 +138,15 @@ async def download_bg(url, download_id, format_args):
     except Exception as err:
         await log_file.write(f'Error: {err}\n')
     finally:
-        # After an error or a cancellation, leave no yt-dlp process behind.
+        # After an error or a cancellation, kill yt-dlp's process group and
+        # reap yt-dlp. Drain first: before Python 3.13, asyncio's wait()
+        # returns only once the pipe is closed, and a paused reader never
+        # sees the end of it.
         if process is not None and process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
-                process.kill()
+                os.killpg(process.pid, signal.SIGKILL)
+            while await process.stdout.read(OUTPUT_CHUNK_BYTES):
+                pass
             await process.wait()
         await log_file.close()
 

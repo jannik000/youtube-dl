@@ -98,8 +98,9 @@ def make_client(webui_env):
             self.returncode = 0
             return 0
 
-        def kill(self):
-            pass
+        @property
+        def pid(self):   # only needed to kill it, and it has finished
+            raise AssertionError('a finished process must not be killed')
 
     async def _fake_exec(*argv, **kwargs):
         captured['argv'] = list(argv)
