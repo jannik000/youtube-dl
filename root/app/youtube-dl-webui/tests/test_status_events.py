@@ -323,7 +323,7 @@ def test_every_hint_is_one_sentence():
 
 def test_clean_text():
     assert se.clean_text('\x1b[0;31mred\x1b[0m') == 'red'
-    assert se.clean_text('a‮gnp.exe⁦b⁩') == 'agnp.exeb'
+    assert se.clean_text('a\u202egnp.exe\u2066b\u2069') == 'agnp.exeb'
     assert se.clean_text('a\x00b\x07c\nd\te') == 'abc d e'
     assert se.clean_text('x' * 400) == 'x' * 299 + '…'
     assert se.clean_text('\ud800ok') == 'ok'
@@ -692,7 +692,7 @@ def test_channel_commands(tmp_path, capsys):
     status_dir = str(tmp_path / 'status')
     assert se.main(['channel-start', f'--status-dir={status_dir}', f'--run={RUN}',
                     f'--nonce={NONCE}', '--index=2', '--total=3',
-                    '--url=https://x/"\n‮', f'--flags-out={flags_file}']) == 0
+                    '--url=https://x/"\n\u202e', f'--flags-out={flags_file}']) == 0
     line = capsys.readouterr().out
     assert line.endswith('\n') and line.count('\n') == 1
     prefix = f'@@ytdl:{NONCE} channel '

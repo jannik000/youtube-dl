@@ -162,8 +162,8 @@ def events_path(status_dir=STATUS_DIR):
 _ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-_]')
 # C0/C1 controls, bidirectional overrides/isolates and marks, lone surrogates.
 _UNSAFE_RE = re.compile(
-    '[\x00-\x08\x0b-\x1f\x7f-\x9f؜‎‏‪-‮'
-    '⁦-⁩\ud800-\udfff]')
+    '[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e'
+    '\u2066-\u2069\ud800-\udfff]')
 
 
 def clean_text(value, limit=MAX_TEXT):

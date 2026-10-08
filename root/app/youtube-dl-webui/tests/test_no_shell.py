@@ -1,7 +1,9 @@
-"""Guard against reintroducing shell execution in the web UI or scripts."""
+"""Guard against reintroducing shell execution in the web UI or scripts,
+and against invisible characters in the sources."""
 
 import os
 import re
+import unicodedata
 
 REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
@@ -53,3 +55,26 @@ def test_shell_script_has_no_eval():
         if stripped.startswith('#'):
             continue
         assert not re.match(r'eval\b', stripped), f'eval at {script}:{lineno}'
+
+
+def test_sources_have_no_invisible_characters():
+    # Bidirectional overrides, zero-width and other format characters, line
+    # separators and control characters make code read differently from how
+    # it runs ("Trojan Source"). Write them as escapes ('\u202e').
+    offenders = []
+    for top in ('root', 'tests', '.github'):
+        for base, dirs, files in os.walk(os.path.join(REPO_ROOT, top)):
+            dirs[:] = [d for d in dirs if d not in ('fixtures', '__pycache__')]
+            for name in files:
+                path = os.path.join(base, name)
+                try:
+                    text = open(path, encoding='utf-8').read()
+                except (UnicodeDecodeError, OSError):
+                    continue   # binary files (favicon.png)
+                for lineno, line in enumerate(text.splitlines(), start=1):
+                    if any(unicodedata.category(c) in ('Cf', 'Zl', 'Zp', 'Co')
+                           or (unicodedata.category(c) == 'Cc'
+                               and c not in '\t')
+                           for c in line):
+                        offenders.append(f'{path}:{lineno}')
+    assert not offenders, f'invisible characters in: {offenders}'

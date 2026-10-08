@@ -135,7 +135,7 @@ class Tree:
 
 
 CHANNELS = (
-    '﻿# channels (with a byte order mark)\n'
+    '\ufeff# channels (with a byte order mark)\n'
     'https://a.example/plain1\n'
     '   https://a.example/plain2   # trailing comment\n'
     ';batch-file comment\n'
