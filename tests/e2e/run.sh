@@ -29,6 +29,15 @@ check() {  # check "description" command...
   if "$@"; then pass "$desc"; else fail "$desc"; fi
 }
 
+log_has() {  # log_has container grep-args...
+  # Reads the whole log before grepping: with pipefail, 'docker logs | grep -q'
+  # fails when grep exits on the first match and docker logs gets SIGPIPE.
+  local logs
+  logs="$(docker logs "$1" 2>&1)" || return 1
+  shift
+  grep -q "$@" <<<"$logs"
+}
+
 wait_for() {  # wait_for seconds command...
   local timeout="$1"; shift
   for _ in $(seq 1 "$timeout"); do
@@ -135,8 +144,8 @@ check "saving channels.txt with valid content works (303)" \
 # prints 'execution took' even when every yt-dlp call fails).
 pass_done=false
 if wait_for 180 sh -c "docker logs $CA 2>&1 | grep -q 'execution took'" \
-   && docker logs "$CA" 2>&1 | grep -Eq 'yt-dlp version: [0-9]{4}\.' \
-   && docker logs "$CA" 2>&1 | grep -q 'ERROR: \[generic\] plain-channel'; then
+   && log_has "$CA" -E 'yt-dlp version: [0-9]{4}\.' \
+   && log_has "$CA" 'ERROR: \[generic\] plain-channel'; then
   pass_done=true; pass "downloader pass completes and yt-dlp really ran"
 else
   fail "downloader pass completes and yt-dlp really ran"
