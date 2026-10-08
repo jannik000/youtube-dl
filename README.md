@@ -33,7 +33,7 @@ yt-dlp documentation [here](https://github.com/yt-dlp/yt-dlp).
     * Included set of starter arguments
 * **Webui Interface**
     * Manage configuration files
-    * Trigger interval downloads
+    * Trigger interval downloads (*Restart youtube-dl* stops the running pass, including a download in progress, and starts a new one)
     * Manual downloading
     * View logs
 * **Automatic Updates**

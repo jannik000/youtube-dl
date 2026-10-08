@@ -103,6 +103,14 @@ Eine abschließende Prüfung nur der Änderungen aus der zweiten Nachprüfung fa
 | R26 | `release.yml`: Versions-Commit scheiterte, wenn `master` sich während des Laufs bewegte; Ausgaben des nicht vertrauenswürdigen `verify`-Jobs wurden in `publish` nicht erneut geprüft; QEMU-Image aus dem gemeinsamen Actions-Cache lief privilegiert | Niedrig | behoben |
 | R27 | Doku: in Forks laufen geplante Workflows erst nach manuellem Aktivieren, `:latest` entsteht nicht durch den Merge; Optionsliste in W6 unvollständig | Niedrig | behoben |
 
+Nach dem Merge fielen zwei Fehler auf, die schon im Upstream-Code steckten (Hotfix, lokal reproduziert:
+Supervisor 4.2.5 mit Stub-Skript, `download_bg()` mit Python-Kindprozess statt yt-dlp):
+
+| ID | Befund | Schweregrad | Status |
+| :--- | :--- | :---: | :--- |
+| R28 | `root/etc/supervisor/conf.d/youtube-dl.conf`: `supervisorctl restart youtube-dl` (Web-UI „Restart youtube-dl“, `POST /restart-youtube-dl`) beendete nur das äußere `bash -c`. `youtube-dl.sh`, sein yt-dlp und `tee` liefen verwaist weiter, neben dem neuen Durchlauf (gleiches Archiv, gleiche Dateien, doppelte Anfragen an YouTube; das alte `tee` schrieb weiter in das vom neuen gekürzte Log). Fix: `stopasgroup`/`killasgroup`. Folge in `root/app/youtube-dl/youtube-dl.sh`: Der Zweig für `youtubedl_interval=false` startet nur noch `terminate` und wartet dann (`sleep infinity`); `supervisorctl stop all` hätte das Skript jetzt selbst beendet, bevor `terminate` startet (Container endet nie), ein Beenden des Skripts hätte per `autorestart` einen zweiten Durchlauf begonnen. Exit-Code des Containers wie bisher 0 (supervisord endet nach SIGQUIT mit 0). E2E: Szenario A prüft nach dem Restart genau ein `youtube-dl.sh` und ein `tee`, Szenario E den Ein-Durchlauf-Modus | Mittel (Betrieb) | behoben |
+| R29 | `root/app/youtube-dl-webui/youtube-dl-webui.py` `download_bg()`: Die Ausgabe wurde zeilenweise gelesen; eine Zeile über 64 KiB (Fortschritt ohne `--newline` in `args.conf`, langes `--print`) brach das Lesen mit `ValueError` ab. Danach las niemand mehr die Pipe: Sobald sie voll war, blockierte yt-dlp für immer, und der Prozess wurde nie abgewartet; das Log enthielt nur `Error: Separator is not found …`. Fix: Kopieren in 64-KiB-Blöcken mit inkrementellem UTF-8-Decoder bis EOF, danach `wait()`; bei Fehler oder Abbruch der Task wird der Prozess beendet und abgewartet (Tests: `root/app/youtube-dl-webui/tests/test_download_bg.py`) | Niedrig (Betrieb) | behoben |
+
 ---
 
 ## Web-UI
