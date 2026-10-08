@@ -498,6 +498,32 @@ def _num(value):
     return value if math.isfinite(value) else None
 
 
+def _new_video(vid):
+    return {'id': vid, 'started': False, 'ended': False, 'done': False}
+
+
+def _update_video(video, event):
+    """Record a start or end event in the video's dict."""
+    info = event['i']
+    for key in ('title', 'channel', 'uploader'):
+        if isinstance(info.get(key), str) and not video.get(key):
+            video[key] = clean_text(info[key])
+    url = info.get('webpage_url')
+    if isinstance(url, str) and len(url) <= MAX_URL:   # never cut a URL
+        video['url'] = clean_text(url, MAX_URL)
+    for key in ('epoch', 'playlist_autonumber', 'n_entries', 'duration'):
+        if _num(info.get(key)) is not None:
+            video[key] = info[key]
+    if event['t'] == 'start':
+        video['started'] = True
+    else:
+        video['ended'] = True
+        paths = info.get('requested_downloads.:.filepath')
+        if isinstance(paths, list) and any(
+                isinstance(p, str) and p for p in paths):
+            video['done'] = True
+
+
 class Entry:
     """What the log and the events say about one channels.txt entry (one
     yt-dlp process). The section of a manual job has index None."""
@@ -527,12 +553,12 @@ class Entry:
         self.playlist = ''
         self.progress = None     # last progress JSON of this entry
         self.phase = ''
+        self.phase_id = None     # id of the video the phase belongs to
 
     def video(self, vid):
         video = self.videos.get(vid)
         if video is None:
-            video = self.videos[vid] = {
-                'id': vid, 'started': False, 'ended': False, 'done': False}
+            video = self.videos[vid] = _new_video(vid)
         return video
 
 
@@ -593,28 +619,9 @@ class LogParser:
                 self._apply(entry, entry.pending.popleft())
 
     def _apply(self, entry, event):
-        info = event['i']
-        vid = info['id']
-        video = entry.video(vid)
-        for key in ('title', 'channel', 'uploader'):
-            if isinstance(info.get(key), str) and not video.get(key):
-                video[key] = clean_text(info[key])
-        url = info.get('webpage_url')
-        if isinstance(url, str) and len(url) <= MAX_URL:   # never cut a URL
-            video['url'] = clean_text(url, MAX_URL)
-        for key in ('epoch', 'playlist_autonumber', 'n_entries', 'duration'):
-            if _num(info.get(key)) is not None:
-                video[key] = info[key]
-        if event['t'] == 'start':
-            video['started'] = True
-            entry.open = vid
-        else:
-            video['ended'] = True
-            paths = info.get('requested_downloads.:.filepath')
-            if isinstance(paths, list) and any(
-                    isinstance(p, str) and p for p in paths):
-                video['done'] = True
-            entry.open = None
+        vid = event['i']['id']
+        _update_video(entry.video(vid), event)
+        entry.open = vid if event['t'] == 'start' else None
 
     def _flush(self, entry):
         while entry.pending:
@@ -660,6 +667,7 @@ class LogParser:
             entry.n_items = None if match.group('n') == 'N/A' else int(match.group('n'))
             entry.open = None
             entry.phase = ''
+            entry.phase_id = None
             return
         match = _PLAYLIST_START_RE.match(line)
         if match:
@@ -715,6 +723,7 @@ class LogParser:
         # still name the video being processed. (A playlist's own id, e.g.
         # from Concat, is no video: its errors count for the whole entry.)
         entry.open = vid
+        entry.phase_id = vid
         if 'progress.postprocessor' in data:
             name = clean_text(data.get('progress.postprocessor'), 40)
             if data.get('progress.status') == 'finished':
@@ -760,14 +769,37 @@ class LogParser:
 
     # -- results -----------------------------------------------------------
 
-    def entry_result(self, entry):
-        """Counts and classified errors of one entry."""
+    def entry_result(self, entry, live=False):
+        """Counts and classified errors of one entry.
+
+        ``live`` is for an entry yt-dlp may still be working on (the web UI's
+        view of a running pass): events not matched to their log line yet
+        count as well, and the video started last, without an end event or
+        an error, is in progress (``'active'``) instead of failed.
+        """
+        videos = entry.videos
+        active = None
+        if live:
+            videos = collections.OrderedDict(
+                (vid, dict(video)) for vid, video in entry.videos.items())
+            for event in entry.pending:
+                vid = event['i']['id']
+                if vid not in videos:
+                    videos[vid] = _new_video(vid)
+                _update_video(videos[vid], event)
+            for vid, video in reversed(videos.items()):
+                if video['started'] and not video['ended']:
+                    if not entry.errors.get(vid):
+                        active = vid
+                    break
         new = failed = 0
         errors = []
         seen = set(entry.entry_errors)
-        for vid, video in entry.videos.items():
+        for vid, video in videos.items():
             if video['done']:
                 new += 1
+                continue
+            if vid == active:
                 continue
             failed += 1
             msgs = [m for _explicit, m, _ie in entry.errors.get(vid, ())]
@@ -780,7 +812,7 @@ class LogParser:
                     error[key] = video[key]
             errors.append(error)
         for vid, msgs in entry.errors.items():
-            if vid in entry.videos:
+            if vid in videos:
                 continue
             explicit = [(m, ie) for is_explicit, m, ie in msgs if is_explicit]
             if not explicit:
@@ -808,7 +840,8 @@ class LogParser:
             errors.append({'idx': entry.index, 'id': None, 'kind': 'other',
                            'msg': entry.error})
         return {'new': new, 'skipped': entry.skipped, 'failed': failed,
-                'filtered': entry.filtered, 'errors': errors}
+                'filtered': entry.filtered, 'errors': errors,
+                'active': active}
 
     def summary(self):
         """{'sum': totals, 'ch': CHANNEL_ROW rows, 'err': errors} for run_end

@@ -554,6 +554,32 @@ def test_manual_job_fixture():
     assert p.current.progress['info.id'] == 'mixed-4'
 
 
+def test_live_entry_result():
+    # The first entry while v1 downloads (the web UI's view of a running
+    # pass): v1 is in progress, not failed; v2 logged its error and is.
+    events, lines = _fixture('pass_default')
+    cut = next(i for i, line in enumerate(lines)
+               if '0.1% of' in line and '"info.id": "v1"' in line)
+    p = se.LogParser(events[0]['nonce'], run=events[0]['run'])
+    starts = [e for e in events
+              if e['t'] == 'start' and e['i']['id'] in ('v1', 'v2')]
+    p.add_events(starts)
+    for line in lines[:cut + 1]:
+        p.feed(line)
+    entry = p.current
+    assert entry.phase == 'downloading' and entry.phase_id == 'v1'
+    live = p.entry_result(entry, live=True)
+    assert (live['active'], live['new'], live['failed']) == ('v1', 0, 3)
+    final = p.entry_result(entry)
+    assert (final['active'], final['new'], final['failed']) == (None, 0, 4)
+    # v1's end event arrives before its "Writing" line: live counts it.
+    p.add_events([e for e in events
+                  if e['t'] == 'end' and e['i']['id'] == 'v1'])
+    live = p.entry_result(entry, live=True)
+    assert (live['active'], live['new'], live['failed']) == (None, 1, 3)
+    assert entry.videos['v1']['ended'] is False   # the parser is unchanged
+
+
 def test_the_nonce_of_a_fixture_is_needed():
     events, lines = _fixture('pass_default')
     p = se.LogParser('0' * 16, run=events[0]['run'])
