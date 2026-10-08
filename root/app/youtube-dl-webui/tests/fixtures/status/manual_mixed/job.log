@@ -1,0 +1,78 @@
+[generic] Extracting URL: http://127.0.0.1:8765/mixed.html
+[generic] mixed: Downloading webpage
+WARNING: [generic] Falling back on generic information extractor
+[generic] mixed: Extracting information
+[download] Downloading playlist: Mixed Page
+[info] There are no playlist thumbnails to download
+[generic] Playlist Mixed Page: Downloading 4 items of 4
+[download] Downloading item 1 of 4
+[info] mixed-1: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-1"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-1"}
+[download] Destination: /downloads/NA/Mixed Page (1).mp4
+[download]   0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:003dd026fc4fe6a8 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852639, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[download] 100.0% of  832.66KiB at  387.86KiB/s ETA 00:00 @@ytdl:003dd026fc4fe6a8 {"progress.status": "downloading", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 397169.83032130176, "progress.eta": 0, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[download] 100% of  832.66KiB in 00:00:02 at 387.30KiB/s @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 396593.1934532123, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[postprocess] EmbedSubtitle started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-1"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-1"}
+[postprocess] Metadata started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "mixed-1"}
+[Metadata] Adding metadata to "/downloads/NA/Mixed Page (1).mp4"
+[postprocess] Metadata finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "mixed-1"}
+[postprocess] EmbedThumbnail started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-1"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-1"}
+[postprocess] MoveFiles started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "mixed-1"}
+[postprocess] MoveFiles finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "mixed-1"}
+[info] Writing '{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 2 of 4
+[info] mixed-2: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-2"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-2"}
+ERROR: unable to download video data: HTTP Error 404: Not Found
+[info] Writing '{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 3 of 4
+[info] mixed-3: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-3"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-3"}
+ERROR: unable to download video data: HTTP Error 429: Too Many Requests
+[info] Writing '{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 4 of 4
+[info] mixed-4: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-4"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-4"}
+[download] Destination: /downloads/NA/Mixed Page (4).mp4
+[download]   0.1% of  832.62KiB at  Unknown B/s ETA Unknown @@ytdl:003dd026fc4fe6a8 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852598, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[download] 100.0% of  832.62KiB at  387.91KiB/s ETA 00:00 @@ytdl:003dd026fc4fe6a8 {"progress.status": "downloading", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 397219.72718579386, "progress.eta": 0, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[download] 100% of  832.62KiB in 00:00:02 at 387.33KiB/s @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 396623.5173476855, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[postprocess] EmbedSubtitle started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-4"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-4"}
+[postprocess] Metadata started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "mixed-4"}
+[Metadata] Adding metadata to "/downloads/NA/Mixed Page (4).mp4"
+[postprocess] Metadata finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "mixed-4"}
+[postprocess] EmbedThumbnail started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-4"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-4"}
+[postprocess] MoveFiles started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "mixed-4"}
+[postprocess] MoveFiles finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "mixed-4"}
+[info] Writing '{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[postprocess] Concat started @@ytdl:003dd026fc4fe6a8 {"progress.status": "started", "progress.postprocessor": "Concat", "info.id": "mixed"}
+[postprocess] Concat finished @@ytdl:003dd026fc4fe6a8 {"progress.status": "finished", "progress.postprocessor": "Concat", "info.id": "mixed"}
+[download] Finished downloading playlist: Mixed Page

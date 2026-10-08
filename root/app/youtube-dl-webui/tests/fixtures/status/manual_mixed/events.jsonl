@@ -1,0 +1,9 @@
+{"v":1,"t":"job_start","ts":1791494394,"run":"a3f1c2d4e5f60718293a4b5c6d7e8f90"}
+{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-1", "title": "Mixed Page (1)", "webpage_url": "http://127.0.0.1:8765/mixed.html", "epoch": 1791494396, "playlist_title": "Mixed Page", "playlist_autonumber": 1, "n_entries": 4}}
+{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-1", "title": "Mixed Page (1)", "epoch": 1791494396, "requested_downloads.:.filepath": ["/downloads/NA/Mixed Page (1).mp4"]}}
+{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-2", "title": "Mixed Page (2)", "webpage_url": "http://127.0.0.1:8765/mixed.html", "epoch": 1791494398, "playlist_title": "Mixed Page", "playlist_autonumber": 2, "n_entries": 4}}
+{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-2", "title": "Mixed Page (2)", "epoch": 1791494398}}
+{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-3", "title": "Mixed Page (3)", "webpage_url": "http://127.0.0.1:8765/mixed.html", "epoch": 1791494398, "playlist_title": "Mixed Page", "playlist_autonumber": 3, "n_entries": 4}}
+{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-3", "title": "Mixed Page (3)", "epoch": 1791494398}}
+{"v":1,"t":"start","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-4", "title": "Mixed Page (4)", "webpage_url": "http://127.0.0.1:8765/mixed.html", "epoch": 1791494398, "playlist_title": "Mixed Page", "playlist_autonumber": 4, "n_entries": 4}}
+{"v":1,"t":"end","src":"manual","run":"a3f1c2d4e5f60718293a4b5c6d7e8f90","i":{"id": "mixed-4", "title": "Mixed Page (4)", "epoch": 1791494398, "requested_downloads.:.filepath": ["/downloads/NA/Mixed Page (4).mp4"]}}
