@@ -343,11 +343,17 @@ def test_download_log_is_tailed(make_client):
     module = client.app_module
     download_id = str(uuid.uuid4())
     path = os.path.join(module.PATHS.download_log_dir, f'download_{download_id}.log')
+    line = 'y' * 99 + '\n'
     with open(path, 'w') as f:
-        f.write('x' * (module.LOG_TAIL_BYTES + 1000) + 'END')
+        f.write('x' * 1000 + '\n')
+        f.write(line * (module.LOG_TAIL_BYTES // 100))
+        f.write('END\npartial')
     r = client.get(f'/log/download/{download_id}', auth=basic())
     assert r.status_code == 200
-    assert len(r.text) == module.LOG_TAIL_BYTES and r.text.endswith('END')
+    # Complete lines only: the line cut by the tail limit and the unfinished
+    # last line are left out.
+    assert len(r.text) <= module.LOG_TAIL_BYTES and r.text.endswith('y\nEND\n')
+    assert set(r.text.splitlines()[:-1]) == {line.strip()}
 
 
 def test_security_headers_present(make_client):

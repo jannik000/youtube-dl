@@ -12,10 +12,12 @@ import aiofiles
 from fastapi import (BackgroundTasks, Depends, FastAPI, Form, HTTPException,
                      Request, status)
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
-                               RedirectResponse)
+                               RedirectResponse, Response)
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
+import dashboard
+import status_events
 import webui_security
 import ytdlp_args
 
@@ -38,6 +40,8 @@ class Paths:
         self.download_log_dir = '/tmp'
         self.youtube_dl_log = '/var/log/youtube-dl/youtube-dl.log'
         self.format_file = '/config.default/format'
+        self.downloads_dir = '/downloads'
+        self.proc_dir = '/proc'
 
     @property
     def args_file(self):
@@ -50,6 +54,19 @@ class Paths:
     @property
     def archive_file(self):
         return f'{self.config_dir}/archive.txt'
+
+    @property
+    def cookies_file(self):
+        return f'{self.config_dir}/cookies.txt'
+
+    @property
+    def status_dir(self):
+        """Dashboard state, written only by the unprivileged user (0700)."""
+        return f'{self.config_dir}/.youtube-dl-status'
+
+    @property
+    def events_file(self):
+        return status_events.events_path(self.status_dir)
 
 
 PATHS = Paths()
@@ -71,19 +88,32 @@ async def _read_file(path):
         return await f.read()
 
 
-async def _log_tail_response(path):
-    """Serve at most the last LOG_TAIL_BYTES of a log file."""
+NO_STORE = {'Cache-Control': 'no-store'}
+
+
+async def _log_tail_response(path, nonce=None):
+    """Serve the complete lines in the last LOG_TAIL_BYTES of a log file,
+    without the dashboard's markers and nonces (dashboard.scrub_log_line)."""
     try:
-        async with aiofiles.open(path, 'rb') as f:
-            await f.seek(0, os.SEEK_END)
-            size = await f.tell()
-            await f.seek(max(0, size - LOG_TAIL_BYTES))
-            data = await f.read()
-        return PlainTextResponse(data.decode(errors='replace'))
-    except FileNotFoundError:
-        return PlainTextResponse('')
+        text = await asyncio.to_thread(dashboard.read_log_tail, path,
+                                       LOG_TAIL_BYTES, nonce)
     except OSError:
         return PlainTextResponse('error reading log', status_code=500)
+    return PlainTextResponse(text, headers=NO_STORE)
+
+
+async def _log_since_response(path, since, nonce=None):
+    """JSON {offset, reset, more, text} for the log panel."""
+    try:
+        data = await asyncio.to_thread(dashboard.read_log_since, path, since,
+                                       nonce)
+    except OSError:
+        return JSONResponse({'detail': 'error reading log'}, status_code=500)
+    return JSONResponse(data, headers=NO_STORE)
+
+
+def _download_log_path(download_id):
+    return f'{PATHS.download_log_dir}/download_{download_id}.log'
 
 
 def _route_path(scope):
@@ -111,7 +141,7 @@ def _join_form_lines(lines):
 
 
 async def download_bg(url, download_id, format_args):
-    log_file_path = f'{PATHS.download_log_dir}/download_{download_id}.log'
+    log_file_path = _download_log_path(download_id)
     argv = [youtubedl_binary, '--no-playlist-reverse', '--playlist-end', '-1',
             '--config-location', PATHS.args_file, *format_args, '--', url]
     log_file = await aiofiles.open(log_file_path, 'w')
@@ -168,6 +198,14 @@ def create_app():
     app = FastAPI(root_path=BASE_PATH, docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.config = config
+    # The dashboard's state lives in this process: uvicorn must run with a
+    # single worker (as supervisor starts it).
+    dash = dashboard.Dashboard(
+        status_dir=PATHS.status_dir, pass_log=PATHS.youtube_dl_log,
+        downloads_dir=PATHS.downloads_dir, cookies_file=PATHS.cookies_file,
+        proc_dir=PATHS.proc_dir,
+        interval=os.environ.get('youtubedl_interval', ''))
+    app.state.dashboard = dash
 
     @app.middleware('http')
     async def auth_gate_and_headers(request, call_next):
@@ -255,7 +293,7 @@ def create_app():
                             media_type='text/javascript')
 
     @app.get('/')
-    async def dashboard(request: Request, _=Depends(require_auth)):
+    async def dashboard_page(request: Request, _=Depends(require_auth)):
         return templates.TemplateResponse(request, 'dashboard.html',
                                           context(request))
 
@@ -291,15 +329,38 @@ def create_app():
             request, 'dashboard.html',
             context(request, {'download_id': download_id}))
 
+    @app.get('/api/status')
+    async def api_status(request: Request, _=Depends(require_auth)):
+        """Dashboard status (Basic auth only). Answers 304 when the client's
+        If-None-Match has the current ETag; nothing is cached."""
+        etag, body = await asyncio.to_thread(dash.status_json)
+        headers = {'ETag': etag, **NO_STORE}
+        if dashboard.etag_matches(request.headers.get('if-none-match'), etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED,
+                            headers=headers)
+        return Response(body, media_type='application/json', headers=headers)
+
+    @app.get('/api/log/youtube-dl')
+    async def api_youtube_dl_log(since: int = -1, _=Depends(require_auth)):
+        nonce = await asyncio.to_thread(dash.log_nonce)
+        return await _log_since_response(PATHS.youtube_dl_log, since, nonce)
+
+    @app.get('/api/log/download/{download_id}')
+    async def api_download_log(download_id: str, since: int = -1,
+                               _=Depends(require_auth)):
+        _validate_id(download_id)
+        return await _log_since_response(_download_log_path(download_id),
+                                         since)
+
     @app.get('/log/youtube-dl', response_class=PlainTextResponse)
     async def youtube_dl_log(_=Depends(require_auth)):
-        return await _log_tail_response(PATHS.youtube_dl_log)
+        nonce = await asyncio.to_thread(dash.log_nonce)
+        return await _log_tail_response(PATHS.youtube_dl_log, nonce)
 
     @app.get('/log/download/{download_id}', response_class=PlainTextResponse)
     async def download_log(download_id: str, _=Depends(require_auth)):
         _validate_id(download_id)
-        return await _log_tail_response(
-            f'{PATHS.download_log_dir}/download_{download_id}.log')
+        return await _log_tail_response(_download_log_path(download_id))
 
     @app.post('/restart-youtube-dl')
     async def restart_youtube_dl(request: Request, auth_kind=Depends(require_auth),

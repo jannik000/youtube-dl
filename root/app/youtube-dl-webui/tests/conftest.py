@@ -37,6 +37,8 @@ def _redirect_paths(module, env):
     module.PATHS.download_log_dir = env['tmp_dir']
     module.PATHS.youtube_dl_log = os.path.join(env['log_dir'], 'youtube-dl.log')
     module.PATHS.format_file = env['format_file']
+    module.PATHS.downloads_dir = env['downloads_dir']
+    module.PATHS.proc_dir = env['proc_dir']
 
 
 @pytest.fixture
@@ -45,7 +47,9 @@ def webui_env(tmp_path, monkeypatch):
     config_dir = tmp_path / 'config'
     log_dir = tmp_path / 'logs'
     tmp_dir = tmp_path / 'tmp'
-    for d in (config_dir, log_dir, tmp_dir):
+    downloads_dir = tmp_path / 'downloads'
+    proc_dir = tmp_path / 'proc'   # no processes unless a test adds some
+    for d in (config_dir, log_dir, tmp_dir, downloads_dir, proc_dir):
         d.mkdir()
     (config_dir / 'args.conf').write_text(DEFAULT_ARGS_CONF)
     (config_dir / 'channels.txt').write_text('# channels\n')
@@ -58,13 +62,16 @@ def webui_env(tmp_path, monkeypatch):
     monkeypatch.setenv('WEBUI_PASSWORD', PASSWORD)
     monkeypatch.setenv('WEBUI_API_TOKEN', API_TOKEN)
     for var in ('WEBUI_READONLY', 'WEBUI_ALLOW_UNSAFE_ARGS',
-                'WEBUI_ALLOWED_DOMAINS', 'youtubedl_webuipath'):
+                'WEBUI_ALLOWED_DOMAINS', 'youtubedl_webuipath',
+                'youtubedl_interval'):
         monkeypatch.delenv(var, raising=False)
 
     return {
         'config_dir': str(config_dir),
         'log_dir': str(log_dir),
         'tmp_dir': str(tmp_dir),
+        'downloads_dir': str(downloads_dir),
+        'proc_dir': str(proc_dir),
         'format_file': str(format_file),
         'monkeypatch': monkeypatch,
     }

@@ -1,4 +1,5 @@
-"""Tests for dashboard.py.
+"""Tests for dashboard.py and the read APIs: GET /api/status and
+GET /api/log/...?since=.
 
 The pass fixtures under fixtures/status/ (see test_status_events.py) are a
 real pass of youtube-dl.sh with the web UI enabled: 5 entries, run id
@@ -7,6 +8,7 @@ real pass of youtube-dl.sh with the web UI enabled: 5 entries, run id
 
 import json
 import os
+import stat
 import sys
 import uuid
 
@@ -16,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import dashboard  # noqa: E402
 import status_events as se  # noqa: E402
+from conftest import basic, bearer  # noqa: E402
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'fixtures', 'status')
@@ -863,3 +866,140 @@ def test_log_tail_of_the_fixture_has_no_nonce(tmp_path):
     assert '[dashboard] Channel 2 of 5: http://127.0.0.1:8765/mixed.html' in text
     assert ('[download] 100% of  832.66KiB in 00:00:02 at 382.65KiB/s\n'
             in text)
+
+
+# -- HTTP API --------------------------------------------------------------------------
+
+def _place_fixture_pass(client):
+    module = client.app_module
+    events, lines = _fixture('pass_default')
+    status_dir = module.PATHS.status_dir
+    os.makedirs(status_dir, mode=0o700, exist_ok=True)
+    with open(module.PATHS.events_file, 'w') as f:
+        for event in events:
+            f.write(json.dumps(event) + '\n')
+    with open(module.PATHS.youtube_dl_log, 'w') as f:
+        f.write('\n'.join(lines))
+    pid_dir = os.path.join(module.PATHS.proc_dir, str(PASS_PID))
+    os.makedirs(pid_dir, exist_ok=True)
+    with open(os.path.join(pid_dir, 'cmdline'), 'wb') as f:
+        f.write(SCRIPT_CMDLINE)
+
+
+READ_APIS = ['/api/status', '/api/log/youtube-dl', '/api/log/youtube-dl?since=0',
+             f'/api/log/download/{uuid.uuid4()}',
+             f'/api/log/download/{uuid.uuid4()}?since=5']
+
+
+@pytest.mark.parametrize('path', READ_APIS)
+def test_read_apis_need_basic_auth(make_client, path):
+    client, _ = make_client()
+    assert client.get(path, auth=basic()).status_code == 200
+    assert client.get(path, headers=bearer()).status_code == 401
+    anonymous = client.get(path)
+    assert anonymous.status_code == 401
+    assert anonymous.headers['www-authenticate'].startswith('Basic ')
+    assert client.get(path, auth=basic('admin', 'wrong')).status_code == 401
+
+
+def test_status_api_etag_and_no_store(make_client):
+    client, _ = make_client()
+    first = client.get('/api/status', auth=basic())
+    assert first.status_code == 200
+    assert first.headers['content-type'] == 'application/json'
+    assert first.headers['cache-control'] == 'no-store'
+    etag = first.headers['etag']
+    boot = first.json()['boot']
+    assert etag.startswith(f'"{boot}-') and first.json()['now'] > 0
+    same = client.get('/api/status', auth=basic(),
+                      headers={'If-None-Match': etag})
+    assert same.status_code == 304 and same.content == b''
+    assert same.headers['etag'] == etag
+    assert same.headers['cache-control'] == 'no-store'
+    assert same.headers['x-frame-options'] == 'DENY'
+    # Something changes: a new revision.
+    _place_fixture_pass(client)
+    changed = client.get('/api/status', auth=basic(),
+                         headers={'If-None-Match': etag})
+    assert changed.status_code == 200 and changed.headers['etag'] != etag
+    assert changed.json()['scheduler']['state'] == 'running'
+    # Another process has another boot id.
+    other, _ = make_client()
+    assert other.get('/api/status', auth=basic(),
+                     headers={'If-None-Match': etag}).status_code == 200
+
+
+def test_no_response_reveals_the_nonce(make_client):
+    client, _ = make_client()
+    _place_fixture_pass(client)
+    module = client.app_module
+    responses = [client.get(path, auth=basic()) for path in (
+        '/api/status', '/api/log/youtube-dl', '/api/log/youtube-dl?since=0',
+        '/log/youtube-dl')]
+    status = responses[0].json()
+    assert status['scheduler']['state'] == 'running'
+    assert status['current']['counts']['new'] == 5
+    for response in responses:
+        assert response.status_code == 200
+        assert PASS_NONCE not in response.text
+    log = responses[1].json()
+    assert log['reset'] and '[dashboard] Channel 3 of 5' in log['text']
+    # The events file holds the nonce; it is never served.
+    with open(module.PATHS.events_file) as f:
+        assert PASS_NONCE in f.read()
+    # A sleeping pass (run_end written) is no different.
+    assert se.main(['end', f'--status-dir={module.PATHS.status_dir}',
+                    f'--run={PASS_RUN}', f'--nonce={PASS_NONCE}', '--rc=1',
+                    '--interval=3h', f'--log={module.PATHS.youtube_dl_log}',
+                    '--wait=0']) == 0
+    sleeping = client.get('/api/status', auth=basic())
+    assert sleeping.json()['scheduler']['state'] == 'sleeping'
+    assert PASS_NONCE not in sleeping.text
+
+
+def test_log_api_since(make_client):
+    client, _ = make_client()
+    module = client.app_module
+    with open(module.PATHS.youtube_dl_log, 'w') as f:
+        f.write('one\ntwo\n')
+    first = client.get('/api/log/youtube-dl', auth=basic()).json()
+    assert first == {'offset': 8, 'reset': True, 'more': False,
+                     'text': 'one\ntwo\n'}
+    with open(module.PATHS.youtube_dl_log, 'a') as f:
+        f.write('three\n')
+    answer = client.get('/api/log/youtube-dl?since=8', auth=basic())
+    assert answer.headers['cache-control'] == 'no-store'
+    assert answer.json() == {'offset': 14, 'reset': False, 'more': False,
+                             'text': 'three\n'}
+    huge = client.get(f'/api/log/youtube-dl?since={10 ** 30}', auth=basic())
+    assert huge.json()['reset'] is True
+    assert client.get('/api/log/youtube-dl?since=x',
+                      auth=basic()).status_code == 422
+
+
+def test_download_log_api(make_client):
+    client, _ = make_client()
+    module = client.app_module
+    download_id = str(uuid.uuid4())
+    path = os.path.join(module.PATHS.download_log_dir,
+                        f'download_{download_id}.log')
+    with open(path, 'w') as f:
+        f.write('[download] 5% @@ytdl:0123456789abcdef {"info.id": "x"}\n')
+    answer = client.get(f'/api/log/download/{download_id}?since=0',
+                        auth=basic()).json()
+    assert answer['text'] == '[download] 5%\n'
+    for bad in ('not-a-uuid', download_id.upper(), '..'):
+        assert client.get(f'/api/log/download/{bad}',
+                          auth=basic()).status_code == 404
+
+
+def test_status_dir_files_stay_private(make_client):
+    # The web UI only reads: it never creates or loosens the status files.
+    client, _ = make_client()
+    module = client.app_module
+    client.get('/api/status', auth=basic())
+    assert not os.path.exists(module.PATHS.status_dir)
+    _place_fixture_pass(client)
+    os.chmod(module.PATHS.events_file, 0o600)
+    client.get('/api/status', auth=basic())
+    assert stat.S_IMODE(os.stat(module.PATHS.events_file).st_mode) == 0o600
