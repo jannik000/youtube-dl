@@ -21,6 +21,13 @@ def _env(name):
     return value if value else None
 
 
+def _parallel(value):
+    value = value.strip()
+    if not value.isdigit():
+        return 1
+    return max(1, min(3, int(value)))
+
+
 class Config:
     """Resolved auth configuration, built once at startup."""
 
@@ -35,6 +42,9 @@ class Config:
         self.allowed_domains = tuple(
             d.strip().lower().lstrip('.') for d in allowed.split(',') if d.strip()
         ) if allowed else ()
+        # Manual downloads running at once (1-3); anything else means 1.
+        self.max_parallel = _parallel(os.environ.get(
+            'WEBUI_MAX_PARALLEL_DOWNLOADS', ''))
         # New random token per process start; embedded in forms, never stored.
         self.csrf_token = secrets.token_urlsafe(32)
 

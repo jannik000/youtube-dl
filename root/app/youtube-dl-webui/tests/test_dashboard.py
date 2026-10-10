@@ -532,6 +532,66 @@ def test_problems_from_the_last_run_and_failed_jobs(env):
     assert finished[0]['state'] == 'failed' and finished[0]['src'] == 'ios'
 
 
+def test_running_and_queued_jobs_from_the_snapshot(env):
+    running, queued, ended = 'e' * 32, 'f' * 32, '1' * 32
+    start = {'id': 'v2', 'title': 'Part 2', 'channel': 'Chan',
+             'playlist_title': 'Lectures', 'playlist_autonumber': 2,
+             'n_entries': 40,
+             'requested_formats.:.format_id': ['137', '140'],
+             'requested_formats.:.filesize': [900, 100]}
+    env.events([
+        {'v': 1, 't': 'job_queued', 'ts': NOW - 60, 'run': running,
+         'url': 'https://www.youtube.com/playlist?list=PL1', 'by': 'token'},
+        {'v': 1, 't': 'job_start', 'ts': NOW - 59, 'run': running},
+        {'v': 1, 't': 'start', 'src': 'manual', 'run': running,
+         'i': dict(start, id='v1', title='Part 1', playlist_autonumber=1)},
+        end('v1', NOW - 50, src='manual', run=running),
+        {'v': 1, 't': 'start', 'src': 'manual', 'run': running, 'i': start},
+        # Ended in the events, still running in the snapshot (a race).
+        {'v': 1, 't': 'job_queued', 'ts': NOW - 5, 'run': ended,
+         'url': 'https://example.com/x', 'by': 'basic'},
+        {'v': 1, 't': 'job_end', 'ts': NOW - 1, 'run': ended, 'state': 'done',
+         'rc': 0},
+    ])
+    progress = {'progress.status': 'downloading', 'info.id': 'v2',
+                'progress.downloaded_bytes': 50, 'progress.total_bytes': 100,
+                'info.format_id': '140', 'info.vcodec': 'none',
+                'info.acodec': 'mp4a', 'info.title': 'Part 2'}
+    snapshot = {
+        'running': [
+            {'id': str(uuid.UUID(running)), 'url': 'https://www.youtube.com/'
+             'playlist?list=PL1', 'by': 'token', 'force': False,
+             'queued': NOW - 60, 'started': NOW - 59, 'cancelling': True,
+             'progress': progress, 'phase': 'downloading', 'phase_id': 'v2',
+             'open': 'v2', 'item': 7, 'n_items': 9, 'playlist': ''},
+            {'id': str(uuid.UUID(ended)), 'url': 'https://example.com/x',
+             'by': 'basic', 'force': False, 'queued': NOW - 5,
+             'started': NOW - 4, 'cancelling': False, 'progress': None,
+             'phase': '', 'phase_id': None, 'open': None, 'item': None,
+             'n_items': None, 'playlist': ''}],
+        'queued': [{'id': str(uuid.UUID(queued)), 'url': 'https://e.com/\x1b[1m',
+                    'by': 'basic', 'force': True, 'queued': NOW, 'position': 1}],
+    }
+    status = env.dash().status(jobs=snapshot)
+    jobs = status['jobs']
+    first = jobs['running'][0]
+    assert first['title'] == 'Lectures' and first['src'] == 'ios'
+    assert first['cancelling'] is True and first['state'] == 'running'
+    assert first['items'] == {'done': 1, 'failed': 0}
+    assert first['item'] == {'index': 2, 'count': 40, 'source': 'events'}
+    video = first['video']
+    assert video['title'] == 'Part 2' and video['channel'] == 'Chan'
+    # The audio stream (100 of 1000 bytes) is half done: 90 % + 5 %.
+    assert video['percent'] == 95.0 and video['stream']['kind'] == 'audio'
+    assert jobs['queued'] == [{
+        'id': str(uuid.UUID(queued)), 'state': 'queued',
+        'url': 'https://e.com/', 'src': 'web', 'force': True, 'queued': NOW,
+        'position': 1}]
+    assert status['pending']['queued'] == 1
+    # A job still in the snapshot is not listed as finished as well.
+    assert jobs['finished'] == []
+
+
 # -- channels and runs -----------------------------------------------------------
 
 def test_channel_history(env):

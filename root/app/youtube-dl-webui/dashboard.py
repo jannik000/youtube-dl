@@ -32,10 +32,13 @@ Rules:
   inflated by crafted video titles; they are cosmetic, never used for
   decisions. ``new``/``done`` come from the events and are exact.
 
-Manual-job events (written by the web UI's job manager):
-``job_queued {ts, run, url, by}``, ``job_start {ts, run}``,
+Manual-job events (written by the web UI's job manager, jobs.py):
+``job_queued {ts, run, url, by, force}``, ``job_start {ts, run}``,
 ``job_end {ts, run, state, rc, title?, error?: {kind, msg}}`` where ``run``
-is the job's UUID as 32 hex characters and ``by`` is ``token`` or ``basic``.
+is the job's UUID as 32 hex characters, ``by`` is ``token`` or ``basic`` and
+``state`` one of done, partial, failed, cancelled, interrupted, already.
+Running and queued jobs come from the job manager's snapshot
+(``status_json(jobs=...)``), finished ones from these events.
 """
 
 import collections
@@ -94,6 +97,7 @@ _SEVERITY_ORDER = {'error': 0, 'warning': 1, 'info': 2}
 JOB_STATES = frozenset({'queued', 'running', 'done', 'partial', 'failed',
                         'cancelled', 'interrupted', 'already'})
 
+_JOB_SOURCES = {'token': 'ios', 'basic': 'web'}
 _HEX_RE = re.compile(r'[0-9a-f]{16,32}\Z')
 _JOB_RE = re.compile(r'[0-9a-f]{32}\Z')
 _YOUTUBE_ID_RE = re.compile(r'[A-Za-z0-9_-]{11}\Z')
@@ -540,8 +544,13 @@ class EventLog:
                     if ch in self.run_names or len(self.run_names) < MAX_ROWS:
                         self.run_names[ch] = name
         job = self.jobs.get(run) if src == 'manual' else None
-        if job is not None and event['t'] == 'start' and not job['title']:
-            job['title'] = clean(info.get('title'))
+        if job is not None and event['t'] == 'start':
+            job['start'] = info
+            if not job['title']:
+                # A playlist job is named after the playlist.
+                job['title'] = clean(
+                    (info.get('playlist_title') if info.get('n_entries')
+                     else '') or info.get('title'))
         if event['t'] != 'end':
             return
         done = _has_file(info)
@@ -569,7 +578,7 @@ class EventLog:
                 'id': job_uuid(run), 'url': None, 'by': None, 'title': '',
                 'state': 'queued', 'queued': None, 'started': None,
                 'ended': None, 'rc': None, 'error': None, 'items_done': 0,
-                'items_failed': 0, 'ts': None}
+                'items_failed': 0, 'ts': None, 'start': None}
             while len(self.jobs) > MAX_JOBS:
                 self.jobs.popitem(last=False)
         ts = _ts(event.get('ts'))
@@ -765,6 +774,16 @@ def video_progress(progress, start=None, phase=''):
     }
 
 
+def youtube_id(item):
+    """The YouTube video id of a failed item if an error line named it with
+    the youtube extractor (what POST /api/download-now takes), else None."""
+    vid = item.get('id')
+    if (item.get('ie') == 'youtube' and isinstance(vid, str)
+            and _YOUTUBE_ID_RE.match(vid)):
+        return vid
+    return None
+
+
 def retry_url(item):
     """The URL 'Download now' would queue for a failed item, or None.
 
@@ -773,9 +792,8 @@ def retry_url(item):
     yt-dlp's output and can be chosen by an uploader, so this is only a
     suggestion: the route must validate it again and needs the user's click
     (CSRF)."""
-    vid = item.get('id')
-    if (item.get('ie') == 'youtube' and isinstance(vid, str)
-            and _YOUTUBE_ID_RE.match(vid)):
+    vid = youtube_id(item)
+    if vid:
         return 'https://www.youtube.com/watch?v=' + vid
     url = item.get('url')
     if isinstance(url, str):
@@ -1102,6 +1120,25 @@ class Dashboard:
             record = self.events.newest_run()
             return record['nonce'] if record else None
 
+    def pass_running(self):
+        """True while the scheduled pass runs (its run_start has no run_end
+        and youtube-dl.sh is alive): 'Run now' then asks first."""
+        with self.lock:
+            self._refresh(self.clock())
+            record = self.events.newest_run()
+            return bool(record is not None and not record['ended']
+                        and script_alive(self.proc_dir, record['pid'],
+                                         record['ts']))
+
+    def known_title(self, video_id):
+        """Title of a recently downloaded video (from the events already
+        read), or ''."""
+        with self.lock:
+            for item in reversed(self.events.items):
+                if item['id'] == video_id and item['title']:
+                    return item['title']
+        return ''
+
     # -- building --------------------------------------------------------
 
     def status_json(self, jobs=None):
@@ -1380,15 +1417,20 @@ class Dashboard:
         return out
 
     def _jobs(self, jobs):
-        if jobs is not None:
-            return jobs
+        """Manual jobs: ``jobs`` is the job manager's snapshot of running
+        and queued jobs (jobs.JobManager.snapshot); finished jobs come from
+        the events, without those the snapshot still lists."""
+        jobs = jobs or {}
+        running = [self._running_job(job) for job in jobs.get('running', ())]
+        queued = [self._queued_job(job) for job in jobs.get('queued', ())]
+        active = {job['id'] for job in running + queued}
         finished = []
         for job in reversed(self.events.jobs.values()):
-            if job['ended'] is None:
+            if job['ended'] is None or job['id'] in active:
                 continue
             finished.append({
                 'id': job['id'], 'state': job['state'], 'url': job['url'],
-                'src': {'token': 'ios', 'basic': 'web'}.get(job['by']),
+                'src': _JOB_SOURCES.get(job['by']),
                 'title': job['title'], 'queued': job['queued'],
                 'started': job['started'], 'ended': job['ended'],
                 'rc': job['rc'], 'error': job['error'],
@@ -1396,7 +1438,70 @@ class Dashboard:
                           'failed': job['items_failed']}})
             if len(finished) >= SHOWN_JOBS:
                 break
-        return {'running': [], 'queued': [], 'finished': finished}
+        return {'running': running, 'queued': queued, 'finished': finished}
+
+    @staticmethod
+    def _queued_job(job):
+        return {'id': clean(job.get('id'), 36), 'state': 'queued',
+                'url': clean_url(job.get('url')),
+                'src': _JOB_SOURCES.get(job.get('by')),
+                'force': job.get('force') is True,
+                'queued': _ts(job.get('queued')),
+                'position': _int(job.get('position'))}
+
+    def _running_job(self, job):
+        """A running job: its live progress (from the job's output, nonce
+        lines only) with the counts and title from its events."""
+        job_id = clean(job.get('id'), 36)
+        record = self.events.jobs.get(job_id.replace('-', '')) or {}
+        start = record.get('start') or {}
+        vid = job.get('open') if isinstance(job.get('open'), str) else None
+        progress = job.get('progress')
+        if not (isinstance(progress, dict) and vid
+                and progress.get('info.id') == vid):
+            progress = None
+        if start.get('id') != vid:
+            start = {}
+        video = None
+        if vid and (progress or start):
+            phase = job.get('phase') if job.get('phase_id') == vid else ''
+            info = progress or {}
+            pick = (lambda *values: next((v for v in values if v), ''))
+            prog = video_progress(progress, start or None,
+                                  phase if isinstance(phase, str) else '')
+            prog.pop('fraction')
+            video = dict(
+                prog, id=clean(vid, 64),
+                title=clean(pick(info.get('info.title'), start.get('title'))),
+                channel=clean(pick(info.get('info.channel'),
+                                   info.get('info.uploader'),
+                                   start.get('channel'),
+                                   start.get('uploader')), 120),
+                playlist=clean(pick(info.get('info.playlist_title'),
+                                    start.get('playlist_title')), 120))
+        item = None
+        for data, prefix in ((progress, 'info.'), (start, '')):
+            auto = _int((data or {}).get(prefix + 'playlist_autonumber'))
+            count = _int((data or {}).get(prefix + 'n_entries'))
+            if auto and count:
+                item = {'index': min(auto, count), 'count': count,
+                        'source': 'events'}
+                break
+        if item is None and _int(job.get('item')) and _int(job.get('n_items')):
+            item = {'index': min(job['item'], job['n_items']),
+                    'count': job['n_items'], 'source': 'log'}
+        title = record.get('title') or (video or {}).get('playlist') \
+            or clean(job.get('playlist')) or (video or {}).get('title') or ''
+        return {
+            'id': job_id, 'state': 'running', 'url': clean_url(job.get('url')),
+            'src': _JOB_SOURCES.get(job.get('by')), 'title': title,
+            'force': job.get('force') is True,
+            'queued': _ts(job.get('queued')), 'started': _ts(job.get('started')),
+            'ended': None, 'rc': None, 'error': None,
+            'cancelling': job.get('cancelling') is True,
+            'video': video, 'item': item,
+            'items': {'done': record.get('items_done', 0),
+                      'failed': record.get('items_failed', 0)}}
 
     def _problems(self, current, errors, last, jobs_view, now):
         items = [dict(e, run=current['run']) for e in errors]
@@ -1436,7 +1541,8 @@ class Dashboard:
                     'id': m.get('id'), 'title': clean(m.get('title')),
                     'src': m['src'], 'channel': m.get('idx'),
                     'ts': m.get('ts'), 'msg': clean(m.get('msg')),
-                    'url': retry_url(m)} for m in members[:MAX_GROUP_ITEMS]],
+                    'url': retry_url(m), 'youtube_id': youtube_id(m)}
+                    for m in members[:MAX_GROUP_ITEMS]],
             })
         out.sort(key=lambda g: (_SEVERITY_ORDER[g['severity']], -g['count']))
         # Bot checks in the last 24 h, over all known runs (cookie card).

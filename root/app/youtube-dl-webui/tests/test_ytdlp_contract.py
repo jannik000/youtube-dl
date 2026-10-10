@@ -7,10 +7,12 @@ server and fail if a yt-dlp update breaks the events. They run in CI and in
 the release workflow before an image is published.
 """
 
+import asyncio
 import http.server
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import threading
@@ -20,6 +22,8 @@ import pytest
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, APP_DIR)
 
+import dashboard  # noqa: E402
+import jobs  # noqa: E402
 import status_events as se  # noqa: E402
 
 yt_dlp = pytest.importorskip('yt_dlp')
@@ -183,3 +187,63 @@ def test_nested_dict_template_is_still_a_trap():
     assert nested == 'NA'
     assert json.loads(flat) == {'id': 'x', 'requested_formats.:.format_id': ['a']}
     assert re.fullmatch(r'\{.*\}', flat)
+
+
+def test_manual_jobs_with_the_real_ytdlp(server, tmp_path):
+    # The job manager's argv (D2: archive, force) and event flags, run by the
+    # real yt-dlp: a download, the same URL again (skipped through the
+    # archive), and once more forced (without the archive).
+    config = tmp_path / 'config'
+    config.mkdir()
+    (config / 'args.conf').write_text(
+        f"-P {shlex.quote(str(tmp_path / 'dl'))}\n-o '%(id)s.%(ext)s'\n"
+        "--no-cache-dir\n--proxy ''\n")
+    wrapper = tmp_path / 'yt-dlp'
+    wrapper.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} '
+                       '-m yt_dlp "$@"\n')
+    wrapper.chmod(0o755)
+    status_dir = str(config / '.youtube-dl-status')
+    manager = jobs.JobManager(
+        status_dir=status_dir, args_file=str(config / 'args.conf'),
+        cookies_file=str(config / 'cookies.txt'),
+        archive_file=str(config / 'archive.txt'), format_default='b',
+        binary=str(wrapper), legacy_log_dir=str(tmp_path))
+    env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(tmp_path)}
+
+    async def spawn(*argv, **kwargs):
+        return await asyncio.create_subprocess_exec(
+            *argv, env=env, cwd=str(tmp_path), **kwargs)
+
+    manager.spawn = spawn
+
+    async def run():
+        out = []
+        for force in (False, False, True):
+            ticket = await manager.submit(f'{server}/clip.mp4', by='token',
+                                          force=force)
+            job = manager.jobs[ticket['id']]
+            await asyncio.wait_for(job.task, 120)
+            out.append(job)
+        return out
+
+    done, skipped, forced = asyncio.run(run())
+    logs = [open(manager.log_path(job.id)).read() for job in (done, skipped, forced)]
+    assert [(j.state, j.rc) for j in (done, skipped, forced)] == [
+        ('done', 0), ('already', 0), ('done', 0)], logs
+    assert done.title == 'clip'
+    assert (config / 'archive.txt').read_text() == 'generic clip\n'
+    assert (tmp_path / 'dl' / 'clip.mp4').read_bytes() == PAYLOAD
+    assert 'has already been recorded in the archive' in logs[1]
+    events = list(se.read_events(status_dir))
+    assert [(e['t'], e['src']) for e in events if e['run'] == done.hex
+            and e['t'] in ('start', 'end')] == [('start', 'manual'),
+                                                  ('end', 'manual')]
+    # What the dashboard makes of it.
+    dash = dashboard.Dashboard(status_dir, str(tmp_path / 'none.log'),
+                               str(tmp_path), str(config / 'cookies.txt'),
+                               proc_dir=str(tmp_path))
+    finished = dash.status(jobs=manager.snapshot())['jobs']['finished']
+    assert [(j['id'], j['state']) for j in finished] == [
+        (forced.id, 'done'), (skipped.id, 'already'), (done.id, 'done')]
+    assert finished[2]['items'] == {'done': 1, 'failed': 0}
+    assert finished[2]['src'] == 'ios' and finished[2]['title'] == 'clip'

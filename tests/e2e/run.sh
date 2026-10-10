@@ -159,8 +159,10 @@ else
 fi
 check "channels.txt payload reached yt-dlp as literal arguments" \
   sh -c "docker logs $CA 2>&1 | grep -q \"invalid integer value: '1;'\""
+# confirm=1: the pass may still be writing its summary, and while a pass
+# runs, 'Run now' answers 409 unless the client confirms the abort.
 check "restart via POST with CSRF token (303)" \
-  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" "$BASE/restart-youtube-dl")" = 303
+  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" --data-urlencode confirm=1 "$BASE/restart-youtube-dl")" = 303
 
 # The marker checks only mean something if the payloads were actually processed.
 for marker in PWNED_channels PWNED_args PWNED_url PWNED_opt PWNED_exec; do

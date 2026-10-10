@@ -1,28 +1,23 @@
 import asyncio
-import codecs
 import contextlib
 import logging
 import os
-import re
-import signal
 import sys
-import uuid
 
 import aiofiles
-from fastapi import (BackgroundTasks, Depends, FastAPI, Form, HTTPException,
-                     Request, status)
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse, Response)
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 import dashboard
+import jobs
 import status_events
 import webui_security
 import ytdlp_args
 
 LOG_TAIL_BYTES = 256 * 1024
-OUTPUT_CHUNK_BYTES = 64 * 1024
 
 # Routes reachable without credentials (no data, needed before login).
 PUBLIC_PATHS = frozenset({'/favicon.ico', '/static/app.js'})
@@ -112,10 +107,6 @@ async def _log_since_response(path, since, nonce=None):
     return JSONResponse(data, headers=NO_STORE)
 
 
-def _download_log_path(download_id):
-    return f'{PATHS.download_log_dir}/download_{download_id}.log'
-
-
 def _route_path(scope):
     """Request path relative to root_path, as Starlette's router sees it.
     Works both behind a prefix-stripping proxy and with the prefix kept."""
@@ -126,59 +117,20 @@ def _route_path(scope):
     return path
 
 
-_UUID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-
-
 def _validate_id(download_id):
     # Only the canonical form produced by str(uuid.uuid4()); uuid.UUID()
     # alone would also accept '{...}', 'urn:uuid:...' and other spellings.
-    if not isinstance(download_id, str) or not _UUID_RE.fullmatch(download_id):
+    if not isinstance(download_id, str) or not jobs.UUID_RE.match(download_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, 'not found')
+
+
+def _truthy(value):
+    """A form flag: a checkbox sends 'on', the API '1' or 'true'."""
+    return (value or '').strip().lower() in ('1', 'true', 'on', 'yes')
 
 
 def _join_form_lines(lines):
     return ''.join(line.replace('\r\n', '\n') for line in lines)
-
-
-async def download_bg(url, download_id, format_args):
-    log_file_path = _download_log_path(download_id)
-    argv = [youtubedl_binary, '--no-playlist-reverse', '--playlist-end', '-1',
-            '--config-location', PATHS.args_file, *format_args, '--', url]
-    log_file = await aiofiles.open(log_file_path, 'w')
-    process = None
-    try:
-        # Own process group (pgid = pid), so cleanup reaches yt-dlp's
-        # children too (ffmpeg, external downloaders share its stdout).
-        process = await asyncio.create_subprocess_exec(
-            *argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-        )
-        # Copy chunks, not lines: progress output without --newline is one
-        # endless line, and reading lines fails beyond 64 KiB. The pipe must
-        # be drained to the end, or yt-dlp blocks on a full pipe.
-        decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
-        while chunk := await process.stdout.read(OUTPUT_CHUNK_BYTES):
-            await log_file.write(decoder.decode(chunk))
-            await log_file.flush()
-        await log_file.write(decoder.decode(b'', final=True))
-        await process.wait()
-        await log_file.write('[youtube-dl] Download process ended\n')
-    except Exception as err:
-        await log_file.write(f'Error: {err}\n')
-    finally:
-        # After an error or a cancellation, kill yt-dlp's process group and
-        # reap yt-dlp. Drain first: before Python 3.13, asyncio's wait()
-        # returns only once the pipe is closed, and a paused reader never
-        # sees the end of it.
-        if process is not None and process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            while await process.stdout.read(OUTPUT_CHUNK_BYTES):
-                pass
-            await process.wait()
-        await log_file.close()
 
 
 def create_app():
@@ -194,18 +146,39 @@ def create_app():
     templates = Jinja2Templates(directory=f'{PATHS.app_dir}/templates')
     format_default = _read_format_default()
 
-    # No interactive API docs: they would be unauthenticated extra surface.
-    app = FastAPI(root_path=BASE_PATH, docs_url=None, redoc_url=None,
-                  openapi_url=None)
-    app.state.config = config
-    # The dashboard's state lives in this process: uvicorn must run with a
-    # single worker (as supervisor starts it).
+    # The dashboard's state and the download queue live in this process:
+    # uvicorn must run with a single worker (as supervisor starts it).
     dash = dashboard.Dashboard(
         status_dir=PATHS.status_dir, pass_log=PATHS.youtube_dl_log,
         downloads_dir=PATHS.downloads_dir, cookies_file=PATHS.cookies_file,
         proc_dir=PATHS.proc_dir,
         interval=os.environ.get('youtubedl_interval', ''))
+    manager = jobs.JobManager(
+        status_dir=PATHS.status_dir, args_file=PATHS.args_file,
+        cookies_file=PATHS.cookies_file, archive_file=PATHS.archive_file,
+        format_default=format_default, binary=youtubedl_binary,
+        parallel=config.max_parallel, legacy_log_dir=PATHS.download_log_dir)
+    manager.title_for = dash.known_title
+
+    def validate_url(url):
+        return webui_security.validate_download_url(url, config)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app):
+        # Resume the queue of the previous process; stop running downloads
+        # on the way out (they become 'interrupted' and can be retried).
+        await manager.start(validate_url)
+        try:
+            yield
+        finally:
+            await manager.shutdown()
+
+    # No interactive API docs: they would be unauthenticated extra surface.
+    app = FastAPI(root_path=BASE_PATH, docs_url=None, redoc_url=None,
+                  openapi_url=None, lifespan=lifespan)
+    app.state.config = config
     app.state.dashboard = dash
+    app.state.jobs = manager
 
     @app.middleware('http')
     async def auth_gate_and_headers(request, call_next):
@@ -252,17 +225,25 @@ def create_app():
             ctx.update(extra)
         return ctx
 
-    def format_args_for(args_conf_text):
-        if re.search(r'(--format |-f )', args_conf_text, flags=re.I | re.MULTILINE):
-            return []
-        return ['--format', format_default]
+    def job_answer(ticket):
+        """JSON of a job ticket: {id, state, position, message}."""
+        return JSONResponse(ticket, headers=NO_STORE)
 
-    async def start_download(url):
-        url = webui_security.validate_download_url(url, config)
-        download_id = str(uuid.uuid4())
-        async with aiofiles.open(PATHS.args_file) as f:
-            format_args = format_args_for(await f.read())
-        return download_id, url, format_args
+    def job_error(err):
+        code = {jobs.QueueFull: status.HTTP_429_TOO_MANY_REQUESTS,
+                jobs.UnknownJob: status.HTTP_404_NOT_FOUND,
+                jobs.JobActive: status.HTTP_409_CONFLICT,
+                jobs.NotActive: status.HTTP_409_CONFLICT,
+                jobs.ShuttingDown: status.HTTP_503_SERVICE_UNAVAILABLE,
+                }.get(type(err), status.HTTP_400_BAD_REQUEST)
+        headers = {'Retry-After': '60'} if isinstance(
+            err, (jobs.QueueFull, jobs.ShuttingDown)) else None
+        return JSONResponse({'detail': str(err), 'message': str(err)},
+                            status_code=code, headers=headers)
+
+    async def queue_download(url, auth_kind, force):
+        url = validate_url(url)
+        return await manager.submit(url, by=auth_kind, force=_truthy(force))
 
     def require_writable():
         if config.readonly:
@@ -298,28 +279,84 @@ def create_app():
                                           context(request))
 
     @app.post('/download')
-    async def download_url(request: Request, background_tasks: BackgroundTasks,
+    async def download_url(request: Request,
                            auth_kind=Depends(require_download_auth),
-                           url: str = Form(...), csrf_token: str = Form('')):
+                           url: str = Form(...), csrf_token: str = Form(''),
+                           force: str = Form('')):
         webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
-        download_id, url, format_args = await start_download(url)
-        background_tasks.add_task(download_bg, url, download_id, format_args)
+        try:
+            ticket = await queue_download(url, auth_kind, force)
+        except jobs.JobError as err:
+            return job_error(err)
         if auth_kind == 'token':
             # API clients cannot follow the redirect to the Basic-auth status
             # page, so answer like /api/download.
-            return JSONResponse({'id': download_id})
-        return RedirectResponse(url=f'{BASE_PATH}/download/{download_id}',
+            return job_answer(ticket)
+        return RedirectResponse(url=f'{BASE_PATH}/download/{ticket["id"]}',
                                 status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post('/api/download')
-    async def api_download(request: Request, background_tasks: BackgroundTasks,
+    async def api_download(request: Request,
                            auth_kind=Depends(require_download_auth),
-                           url: str = Form(...), csrf_token: str = Form('')):
-        """JSON endpoint for the iOS shortcut: returns {"id": ...}."""
+                           url: str = Form(...), csrf_token: str = Form(''),
+                           force: str = Form('')):
+        """JSON endpoint for the iOS shortcut: {id, state, position,
+        message}; 429 with Retry-After when the queue is full."""
         webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
-        download_id, url, format_args = await start_download(url)
-        background_tasks.add_task(download_bg, url, download_id, format_args)
-        return JSONResponse({'id': download_id})
+        try:
+            return job_answer(await queue_download(url, auth_kind, force))
+        except jobs.JobError as err:
+            return job_error(err)
+
+    @app.post('/api/download/{download_id}/cancel')
+    async def cancel_download(request: Request, download_id: str,
+                              auth_kind=Depends(require_auth),
+                              csrf_token: str = Form('')):
+        """Cancel a queued job, or stop a running one (202: SIGTERM sent,
+        SIGKILL follows if needed)."""
+        _validate_id(download_id)
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        try:
+            ticket = await manager.cancel(download_id)
+        except jobs.JobError as err:
+            return job_error(err)
+        response = job_answer(ticket)
+        if ticket['state'] == 'running':
+            response.status_code = status.HTTP_202_ACCEPTED
+        return response
+
+    @app.post('/api/download/{download_id}/retry')
+    async def retry_download(request: Request, download_id: str,
+                             auth_kind=Depends(require_auth),
+                             csrf_token: str = Form(''),
+                             force: str = Form('')):
+        """Queue a finished job's URL again (validated again); force=1 for
+        'Re-download'."""
+        _validate_id(download_id)
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        try:
+            return job_answer(await manager.retry(
+                download_id, validate_url,
+                force=True if _truthy(force) else None))
+        except jobs.JobError as err:
+            return job_error(err)
+
+    @app.post('/api/download-now')
+    async def download_now(request: Request, auth_kind=Depends(require_auth),
+                           csrf_token: str = Form(''),
+                           video_id: str = Form(''), force: str = Form('')):
+        """'Download now' of a failed video: a YouTube id from the problems
+        list becomes a watch URL, validated like any other URL."""
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        try:
+            url = jobs.watch_url(video_id)
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                'invalid YouTube video id')
+        try:
+            return job_answer(await queue_download(url, auth_kind, force))
+        except jobs.JobError as err:
+            return job_error(err)
 
     @app.get('/download/{download_id}')
     async def download_status(request: Request, download_id: str,
@@ -333,7 +370,8 @@ def create_app():
     async def api_status(request: Request, _=Depends(require_auth)):
         """Dashboard status (Basic auth only). Answers 304 when the client's
         If-None-Match has the current ETag; nothing is cached."""
-        etag, body = await asyncio.to_thread(dash.status_json)
+        snapshot = manager.snapshot()   # in the event loop, like the queue
+        etag, body = await asyncio.to_thread(dash.status_json, snapshot)
         headers = {'ETag': etag, **NO_STORE}
         if dashboard.etag_matches(request.headers.get('if-none-match'), etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED,
@@ -349,7 +387,7 @@ def create_app():
     async def api_download_log(download_id: str, since: int = -1,
                                _=Depends(require_auth)):
         _validate_id(download_id)
-        return await _log_since_response(_download_log_path(download_id),
+        return await _log_since_response(manager.log_path(download_id),
                                          since)
 
     @app.get('/log/youtube-dl', response_class=PlainTextResponse)
@@ -360,14 +398,23 @@ def create_app():
     @app.get('/log/download/{download_id}', response_class=PlainTextResponse)
     async def download_log(download_id: str, _=Depends(require_auth)):
         _validate_id(download_id)
-        return await _log_tail_response(_download_log_path(download_id))
+        return await _log_tail_response(manager.log_path(download_id))
 
     @app.post('/restart-youtube-dl')
     async def restart_youtube_dl(request: Request, auth_kind=Depends(require_auth),
-                                 csrf_token: str = Form('')):
+                                 csrf_token: str = Form(''),
+                                 confirm: str = Form('')):
+        """'Run now': restart the downloader. While a pass runs, that
+        aborts it, so the client must confirm (409 without confirm=1)."""
         webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        if not _truthy(confirm) and await asyncio.to_thread(dash.pass_running):
+            return JSONResponse(
+                {'detail': 'A scheduled run is in progress. Send confirm=1 '
+                           'to abort it and start over.'},
+                status_code=status.HTTP_409_CONFLICT)
         await asyncio.create_subprocess_exec('supervisorctl', 'restart',
-                                             'youtube-dl')
+                                             'youtube-dl',
+                                             stdin=asyncio.subprocess.DEVNULL)
         return RedirectResponse(url=f'{BASE_PATH}/',
                                 status_code=status.HTTP_303_SEE_OTHER)
 

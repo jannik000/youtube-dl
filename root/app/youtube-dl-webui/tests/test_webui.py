@@ -118,7 +118,7 @@ def test_api_token_is_csrf_exempt(make_client):
     r = client.post('/api/download', headers=bearer(),
                     data={'url': 'https://youtube.com/watch?v=x'})
     assert r.status_code == 200
-    assert set(r.json()) == {'id'}
+    assert set(r.json()) == {'id', 'state', 'position', 'message'}
 
 
 def test_restart_requires_post_and_csrf(make_client):
@@ -239,11 +239,23 @@ SAVE_ROUTES = [
     ('/edit/channels/save', 'channels_new', 'https://youtube.com/c/x\n'),
     ('/edit/archive/save', 'archive_new', 'youtube abc\n'),
 ]
+JOB_ID = '12345678-1234-4678-9234-567812345678'
 POST_ROUTES = [(route, {field: [value]}) for route, field, value in SAVE_ROUTES] + [
     ('/download', {'url': 'https://youtube.com/watch?v=x'}),
     ('/api/download', {'url': 'https://youtube.com/watch?v=x'}),
-    ('/restart-youtube-dl', {}),
+    ('/restart-youtube-dl', {'confirm': '1'}),
+    (f'/api/download/{JOB_ID}/cancel', {}),
+    (f'/api/download/{JOB_ID}/retry', {}),
+    ('/api/download-now', {'video_id': 'dQw4w9WgXcQ'}),
 ]
+
+
+def test_every_post_route_is_in_the_csrf_test(make_client):
+    client, _ = make_client()
+    posts = {route.path for route in client.app.routes
+             if 'POST' in getattr(route, 'methods', ())}
+    tested = {route.replace(JOB_ID, '{download_id}') for route, _ in POST_ROUTES}
+    assert posts == tested
 
 
 @pytest.mark.parametrize('route,data', POST_ROUTES)
@@ -327,7 +339,8 @@ def test_token_on_download_returns_json(make_client):
     r = client.post('/download', headers=bearer(),
                     data={'url': 'https://youtube.com/watch?v=x'},
                     follow_redirects=False)
-    assert r.status_code == 200 and set(r.json()) == {'id'}
+    assert r.status_code == 200
+    assert set(r.json()) == {'id', 'state', 'position', 'message'}
 
 
 def test_url_whitespace_is_stripped(make_client):
