@@ -25,6 +25,14 @@ yt-dlp documentation [here](https://github.com/yt-dlp/yt-dlp).
 > *Release Images* and run it once (*Run workflow* on `master`). Before
 > switching a container, check that the image exists:
 > `docker manifest inspect ghcr.io/jannik000/youtube-dl:latest`.
+>
+> **Upgrading to the dashboard release?** The web UI is a new [dashboard](#dashboard)
+> (Semantic UI and every CDN request are gone). Each `channels.txt` line now
+> runs as its own yt-dlp process, so `--break-on-existing` and `--max-downloads`
+> count per line ([details](#one-yt-dlp-per-line)). Manual downloads wait in a
+> queue and now use `cookies.txt` and the download archive like scheduled
+> passes ([details](#manual-downloads)). While the web UI is enabled, the
+> container log gets extra progress and marker lines.
 
 # Features
 * **Easy Usage with Minimal Setup**
@@ -32,10 +40,11 @@ yt-dlp documentation [here](https://github.com/yt-dlp/yt-dlp).
     * Included format selection argument
     * Included set of starter arguments
 * **Webui Interface**
+    * Live [dashboard](#dashboard): status cards, progress of the current pass and of manual downloads, per-channel table, recent runs, failures that need attention, cookie health
+    * Manual downloading through a queue (browser form or iOS Shortcut), with cancel, retry and re-download
     * Manage configuration files
-    * Trigger interval downloads (*Restart youtube-dl* stops the running pass, including a download in progress, and starts a new one)
-    * Manual downloading
-    * View logs
+    * Trigger interval downloads (*Run now* stops the running pass, including a download in progress, and starts a new one; it asks first while a pass runs)
+    * View logs (live tail with filters)
 * **Automatic Updates**
     * Automated image building on every yt-dlp release
     * Optional self updating container (opt-in)
@@ -113,7 +122,7 @@ Then configure the channels as explained in the [Configure youtube-dl](#configur
 | `UMASK` | (`022`) | If you need to specify umask for file permission reasons.
 | `youtubedl_debug` | `true` (`false`) | Used to enable verbose mode.
 | `youtubedl_lockfile` | `true` (`false`) | Used to enable youtubedl-running, youtubedl-completed files in downloads directory. Useful for external scripts.
-| `youtubedl_webui` | `true` (`false`) | Used to enable webui feature with the ability to manage configuration files, view logs and perform manual downloads.
+| `youtubedl_webui` | `true` (`false`) | Used to enable the web UI: the [dashboard](#dashboard), manual downloads, configuration editing and logs. While it is enabled, the downloader also writes the dashboard's status events (see [Dashboard](#dashboard)).
 | `youtubedl_webuipath` | `/yt` (empty) | Set if you wish to change the path the webui is served from e.g. if you want to put the ui behind a path based reverse proxy. Must start with `/`; works whether or not the proxy strips the prefix.
 | `youtubedl_webuiport` | (`8080`) | If you need to change the webui port.
 | `youtubedl_subscriptions` | `true` (`false`) | If you want to download all your subscriptions. Authentication is required.
@@ -130,7 +139,8 @@ These only apply when `youtubedl_webui=true`.
 | :---: | :---: | :--- |
 | `WEBUI_USERNAME` | (none) | Username for the browser login (HTTP Basic). Required together with `WEBUI_PASSWORD` to use the browser UI.
 | `WEBUI_PASSWORD` | (none) | Password for the browser login. Use a long, unique value.
-| `WEBUI_API_TOKEN` | (none) | Bearer token for `POST /api/download` and `POST /download` (e.g. the iOS shortcut); with the token both answer JSON `{"id": "..."}`. A long random string. Does **not** grant access to config editing or logs.
+| `WEBUI_API_TOKEN` | (none) | Bearer token for `POST /api/download` and `POST /download` (e.g. the iOS shortcut); with the token both answer JSON `{"id", "state", "position", "message"}` (see [iOS Shortcut](#ios-shortcut)). A long random string. Does **not** grant access to the dashboard, config editing or logs.
+| `WEBUI_MAX_PARALLEL_DOWNLOADS` | `2` (`1`) | How many [manual downloads](#manual-downloads) run at the same time, 1 to 3 (larger numbers count as 3, anything else as 1). Further ones wait in a queue of at most 20. One manual download may already run next to the scheduled pass; more parallel downloads mean more requests to YouTube.
 | `WEBUI_READONLY` | `true` (`false`) | If `true`, the web UI cannot edit `args.conf`, `channels.txt` or `archive.txt`; they are shown read-only.
 | `WEBUI_ALLOWED_DOMAINS` | (none) | Comma-separated allowlist of domains accepted by the download endpoints, e.g. `youtube.com,youtu.be`. Subdomains are included. Unset means any `http(s)` host.
 | `WEBUI_ALLOW_UNSAFE_ARGS` | `true` (`false`) | If `true`, disables validation of saved `args.conf`/`channels.txt`. Only enable if you understand that options such as `--exec` then allow arbitrary command execution.
@@ -161,8 +171,16 @@ The web UI is protected by two independent mechanisms:
 * **Browser:** HTTP Basic Auth using `WEBUI_USERNAME` and `WEBUI_PASSWORD`.
 * **API / automation:** a bearer token in the `Authorization` header
   (`Authorization: Bearer <WEBUI_API_TOKEN>`), accepted only on the download
-  endpoints `POST /download` and `POST /api/download`. It cannot edit the
-  configuration or read logs, so a leaked token only allows starting downloads.
+  endpoints `POST /download` and `POST /api/download`. It cannot read the
+  dashboard, its status API or logs, cancel or retry jobs, or edit the
+  configuration, so a leaked token only allows queueing downloads.
+
+| Request | Basic auth | API token | No credentials |
+| :--- | :---: | :---: | :---: |
+| `POST /download`, `POST /api/download` | yes (browser form needs the CSRF token) | yes (JSON answer) | 401 |
+| Pages, `GET /api/status`, `GET /api/log/...`, `GET /log/...` | yes | 401 | 401 |
+| Cancel, retry, *Download now*, *Run now*, saving files | yes, with CSRF token | 401 | 401 |
+| `/static/app.js`, `/static/app.css`, `/favicon.ico` | public | public | public |
 
 Credentials are read only from environment variables and compared in constant
 time. Set your own values; the examples in this README are placeholders.
@@ -172,6 +190,103 @@ the UI behind a reverse proxy with a certificate (e.g. the Synology DSM
 reverse proxy for `youtube.jannikseuss.de`) and bind the container port to
 `127.0.0.1` rather than exposing it on the LAN. The UI also sets a strict CSRF
 check on browser form posts and is intended for trusted networks only.
+
+The pages load nothing from other hosts. The Content Security Policy is
+`default-src 'none'` with only the app itself allowed for scripts, styles,
+images and requests (no inline scripts or styles, no CDN, system fonts).
+
+# Dashboard
+The start page of the web UI (`youtubedl_webui=true`) shows what the
+container is doing. It refreshes itself every 2 s while something runs
+(otherwise every 10 s) and pauses while the browser tab is hidden. It works
+on a phone, a tablet and a desktop, in light and dark mode.
+
+**Status cards**
+
+| Card | What it shows |
+| :--- | :--- |
+| Scheduler | Running (since when), sleeping until the next pass, interrupted, or finished (one-shot mode). |
+| Last run | Start, duration and result of the newest finished pass: new videos, or failures and the exit code. |
+| Last 24 h | Videos downloaded in the last 24 hours, split into scheduled and manual, with a 7-day mini chart. |
+| This run | New, skipped, failed and filtered videos of the running pass (or of the last one while idle). Tagged *from log*, see the limits below. |
+| Pending | Manual downloads waiting in the queue; during a pass also the channels left and "≤ *k* more in this channel". Tagged *estimate*. |
+| Disk | Free space under `/downloads`; warns below 20 GB or 5 %. |
+| Cookies | Whether `/config/cookies.txt` exists and has YouTube login cookies, when they expire, and whether YouTube asked for a bot check or rotated them. |
+
+**Panels**
+* **Now:** the current video (title, channel, phase, percent, speed, ETA) and
+  an overall bar for the pass.
+* **Manual downloads:** the running download with its own bars, the queue
+  (cancel), and finished ones with *Retry*, *Re-download* and their log. A
+  job page (`/download/<id>`) shows one download with its log.
+* **Needs attention:** failures of the current and the last pass and failed
+  manual downloads, grouped by cause (bot check, rate limit, forbidden,
+  unavailable, private or members-only, geo-blocked, disk full, cookies
+  expired) with a one-line hint. Videos
+  with a YouTube id get *Download now*, which queues the watch URL as a
+  manual download.
+* **Recently downloaded**, **Channels** (per `channels.txt` line: last
+  checked, last new video, last result; a channel without a new video for
+  90 days is marked stale) and **Recent runs** (the last 10 passes).
+* **Log:** the pass log or a download's log, tailed live, with filters
+  (errors and warnings, hide archive skips), follow, copy and download.
+
+**Honest limits**
+* *Pending* is never an exact count. yt-dlp only learns what is new by
+  fetching a channel, so channels not reached yet are unknown, and
+  "≤ *k* more" is an upper bound (archived videos are skipped instantly).
+  Queued manual downloads and channels left are exact.
+* *from log*: new and failed videos come from yt-dlp's own events. Skipped
+  and filtered counts and the cause of a failure come from yt-dlp's log
+  lines. A video title can imitate such lines and inflate them; with
+  `--quiet` in `args.conf` they read 0.
+* Counters start at 0 after the upgrade (`archive.txt` has no dates), and
+  the 24-hour boundary uses yt-dlp's extraction time.
+* Channels and recent runs appear after the first pass with the web UI
+  enabled has finished.
+* The dashboard keeps its state in the web UI's single process: uvicorn
+  runs with one worker. Do not add workers, or the queue and the
+  dashboard break.
+
+**Without JavaScript** the page says that live status needs JavaScript; the
+download form and the editors still work. Browser navigations get HTML error
+pages (for example the confirmation for *Run now* while a pass runs); API
+clients keep getting JSON.
+
+**Status files.** While the web UI is enabled, the downloader writes events to
+`/config/.youtube-dl-status/events.jsonl` (directory 0700, files 0600, owned
+by `PUID`; rotated at 2 MiB, one `.1` kept), and manual download logs go to
+`/config/.youtube-dl-status/jobs/` (newest 50 kept). With the web UI off,
+nothing is written there and the downloader runs as before.
+
+**Extra container log lines.** While the web UI is enabled, `docker logs` and
+`/var/log/youtube-dl/youtube-dl.log` get a progress line every 2 seconds
+during a download, a few `[postprocess]` lines and two `[info] Writing ...`
+lines per video, and one marker line per channel. They carry a random
+per-pass key that only the server knows, so a video title cannot fake them.
+The log views of the web UI strip these lines and the key; they return
+complete lines only.
+
+# Manual downloads
+URLs from the dashboard's form or from the [iOS Shortcut](#ios-shortcut) go
+into a queue:
+
+* `WEBUI_MAX_PARALLEL_DOWNLOADS` downloads (default 1) run at a time, at most
+  20 wait. A full queue answers `429 Too Many Requests` with `Retry-After: 60`.
+* A URL that is already queued or running is not added twice; you get the
+  existing download back.
+* Manual downloads use `/config/cookies.txt` if it exists and the download
+  archive `/config/archive.txt` (unless `args.conf` sets its own
+  `--download-archive`), like the scheduled passes. A YouTube video that is
+  already in the archive is answered at once with "Already downloaded",
+  without starting yt-dlp.
+* **Re-download anyway** (checkbox in the form, *Re-download* on a finished
+  download) runs yt-dlp without any archive (`--no-download-archive`), so
+  the video is fetched again and not recorded in the archive.
+* Running and queued downloads can be cancelled; failed, cancelled and
+  interrupted ones can be retried (the URL is validated again).
+* If the web UI restarts, queued downloads are queued again and a running one
+  is shown as interrupted, with *Retry*.
 
 # docker-compose
 ```yaml
@@ -208,8 +323,21 @@ Do not commit real passwords or tokens. Keep them in a local `.env` file or
 your Synology's environment settings, not in a file you push to GitHub.
 
 # iOS Shortcut
-`POST /api/download` returns JSON (`{"id": "..."}`) with no redirect, which
-suits the iOS *Shortcuts* app and the Share Sheet.
+`POST /api/download` returns JSON with no redirect, which suits the iOS
+*Shortcuts* app and the Share Sheet:
+
+```json
+{"id": "6f1c...", "state": "queued", "position": 2, "message": "Queued (position 2)."}
+```
+
+`state` is `running`, `queued` or `already` (in the download archive);
+`position` is the place in the queue (`null` when running), and `message` is
+a sentence meant for the user. To see it, add **Get Dictionary Value**
+(`message`) and **Show Notification** after the request. Errors answer with a
+`detail` text: `400` for a URL that is not accepted, `429` when the queue is
+full (20 waiting; `Retry-After: 60`, with `message` too), `503` while the web
+UI shuts down.
+The token cannot read the job's progress; open the dashboard for that.
 
 1. Create a shortcut that accepts URLs from the Share Sheet.
 2. Add a **Get Contents of URL** action:
@@ -254,6 +382,14 @@ runtime.
     # Another one
     https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q
     ```
+    <a id="one-yt-dlp-per-line"></a>**Each line runs as its own yt-dlp process**, one after the
+    other (lines starting with `#` are comments; for a plain URL without ` | ` also lines
+    starting with `;` or `]` and a trailing ` #comment`, as yt-dlp's batch file reader did). Each
+    line has its own exit code and shows up as its own row on the dashboard. Options that stop
+    yt-dlp early therefore apply **per line**: `--break-on-existing` stops only the current line,
+    and `--max-downloads N` allows *N* videos per line, not per pass. Each line costs about one
+    second of yt-dlp startup. The subscriptions feed and Watch Later count as one line each.
+
     You can also specify additional args to be used per URL. This is done by adding args after the URL separated by the ` | ` character.  
     These will override any conflicting args from `args.conf`. They are split with shell-style quoting
     but never run through a shell (`;`, `$(...)` and variables are passed to yt-dlp literally).
@@ -315,7 +451,7 @@ runtime.
 
     **Unsupported arguments**
     * `--config-location`, hardcoded to `/config/args.conf`.
-    * `--batch-file`, hardcoded to `/config/channels.txt`.
+    * `--batch-file`; URLs come from `/config/channels.txt`, one yt-dlp process per line.
     * Shell command substitution `$(...)` in `--output` is no longer evaluated
       (it used to run as a shell command). Use yt-dlp output templates such as
       `%(upload_date>%Y)s` instead.
