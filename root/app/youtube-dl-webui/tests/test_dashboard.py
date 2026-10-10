@@ -10,7 +10,10 @@ import json
 import os
 import stat
 import sys
+import time
+import types
 import uuid
+from unittest import mock
 
 import pytest
 
@@ -449,9 +452,16 @@ def _finished_pass(env):
     events, lines = _fixture('pass_default')
     env.events(events)
     env.set_log(lines)
-    assert se.main(['end', f'--status-dir={env.status_dir}', f'--run={PASS_RUN}',
-                    f'--nonce={PASS_NONCE}', '--rc=1', '--interval=3h',
-                    f'--log={env.log}', '--wait=0']) == 0
+    # 'end' stamps run_end with the clock: use the fixture's time, or the
+    # 24 h counters would depend on the age of the fixture.
+    clock = types.SimpleNamespace(
+        time=lambda: max(e['ts'] for e in events if 'ts' in e) + 5,
+        monotonic=time.monotonic, sleep=time.sleep)
+    with mock.patch.object(se, 'time', clock):
+        assert se.main(['end', f'--status-dir={env.status_dir}',
+                        f'--run={PASS_RUN}', f'--nonce={PASS_NONCE}',
+                        '--rc=1', '--interval=3h', f'--log={env.log}',
+                        '--wait=0']) == 0
     with open(env.events_file) as f:
         return json.loads(f.read().splitlines()[-1])
 
