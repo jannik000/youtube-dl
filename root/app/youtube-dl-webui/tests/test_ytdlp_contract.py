@@ -4,7 +4,12 @@ The event flags rely on yt-dlp behaviour that is not a stable API (the
 internal progress field '_default_template', dict templates, which print
 options imply --quiet). These tests run the real yt-dlp against a local HTTP
 server and fail if a yt-dlp update breaks the events. They run in CI and in
-the release workflow before an image is published.
+the release workflow before an image is published, and need no network: the
+only server is a loopback one, and yt-dlp runs with --proxy ''.
+
+With YTDLP_CONTRACT_VERSION set (CI and release.yml set it to the version
+under test), a missing yt-dlp or a different installed version fails the run
+instead of skipping it, so drift cannot slip through as a skip.
 """
 
 import asyncio
@@ -26,7 +31,11 @@ import dashboard  # noqa: E402
 import jobs  # noqa: E402
 import status_events as se  # noqa: E402
 
-yt_dlp = pytest.importorskip('yt_dlp')
+REQUIRED_VERSION = os.environ.get('YTDLP_CONTRACT_VERSION', '').strip()
+if REQUIRED_VERSION:
+    import yt_dlp  # noqa: E402  (required: an ImportError fails the run)
+else:
+    yt_dlp = pytest.importorskip('yt_dlp')
 
 PAYLOAD = bytes(range(256)) * 768        # 192 KiB, served as video/mp4
 
@@ -83,6 +92,13 @@ def download(server, tmp_path_factory):
     return {'rc': proc.returncode, 'output': output, 'lines': output.splitlines(),
             'event_lines': event_lines, 'run': run, 'nonce': nonce,
             'dl': work / 'dl'}
+
+
+def test_installed_version_is_the_one_under_test():
+    if not REQUIRED_VERSION:
+        pytest.skip('YTDLP_CONTRACT_VERSION not set')
+    from yt_dlp.version import __version__
+    assert __version__ == REQUIRED_VERSION
 
 
 def test_download_succeeds(download):

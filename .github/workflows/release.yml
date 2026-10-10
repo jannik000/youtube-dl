@@ -80,13 +80,20 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Test the validator against the new yt-dlp
+      # The suite includes tests/test_ytdlp_contract.py: the dashboard's event
+      # flags run against the real new yt-dlp (loopback server only, no
+      # network). With YTDLP_CONTRACT_VERSION set it fails instead of skipping
+      # when yt-dlp is missing or another version is installed, so yt-dlp
+      # drift blocks publishing.
+      - name: Test the validator and the event-flag contract against the new yt-dlp
         if: steps.check.outputs.build == 'true'
+        env:
+          YTDLP_CONTRACT_VERSION: ${{ steps.check.outputs.version }}
         run: |
           python -m pip install --upgrade pip
-          pip install -r root/app/requirements.txt "yt-dlp[default]==${{ steps.check.outputs.version }}"
+          pip install -r root/app/requirements.txt "yt-dlp[default]==$YTDLP_CONTRACT_VERSION"
           pip install pytest httpx
-          pytest -q root/app/youtube-dl-webui/tests
+          pytest -q -rs root/app/youtube-dl-webui/tests
 
       - name: End-to-end test the image with the new yt-dlp
         if: steps.check.outputs.build == 'true'
