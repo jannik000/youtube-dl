@@ -310,10 +310,14 @@ def test_api_docs_disabled(make_client, path):
     assert client.get(path, auth=basic()).status_code == 404
 
 
-@pytest.mark.parametrize('path', ['/static/app.js', '/favicon.ico'])
-def test_public_assets_need_no_auth(make_client, path):
+@pytest.mark.parametrize('path,media', [
+    ('/static/app.js', 'text/javascript'), ('/static/app.css', 'text/css'),
+    ('/favicon.ico', 'image/png')])
+def test_public_assets_need_no_auth(make_client, path, media):
     client, _ = make_client()
-    assert client.get(path).status_code == 200
+    r = client.get(path)
+    assert r.status_code == 200
+    assert r.headers['content-type'].split(';')[0] == media
 
 
 def test_unauthenticated_body_is_not_parsed(make_client):
@@ -329,9 +333,13 @@ def test_base_path_with_and_without_prefix_stripping(make_client):
     client, _ = make_client(youtubedl_webuipath='/yt')
     for prefix in ('/yt', ''):  # '' = reverse proxy that strips /yt
         assert client.get(f'{prefix}/static/app.js').status_code == 200
+        assert client.get(f'{prefix}/static/app.css').status_code == 200
         assert client.get(f'{prefix}/', auth=basic()).status_code == 200
         assert client.get(f'{prefix}/edit/args').status_code == 401
-    assert 'src="/yt/static/app.js"' in client.get('/yt/', auth=basic()).text
+    html = client.get('/yt/', auth=basic()).text
+    assert 'src="/yt/static/app.js"' in html
+    assert 'href="/yt/static/app.css"' in html
+    assert 'data-base-path="/yt"' in html
 
 
 def test_token_on_download_returns_json(make_client):
@@ -373,17 +381,22 @@ def test_security_headers_present(make_client):
     client, _ = make_client()
     r = client.get('/', auth=basic())
     assert r.headers['X-Frame-Options'] == 'DENY'
-    assert "frame-ancestors 'none'" in r.headers['Content-Security-Policy']
     assert r.headers['X-Content-Type-Options'] == 'nosniff'
+    csp = r.headers['Content-Security-Policy']
     directives = {}
-    for part in r.headers['Content-Security-Policy'].split(';'):
+    for part in csp.split(';'):
         name, *values = part.split()
         directives[name] = values
-    # Semantic UI's stylesheet imports Google Fonts and embeds data: fonts.
-    assert 'https://fonts.googleapis.com' in directives['style-src']
-    assert {'data:', 'https://fonts.gstatic.com'} <= set(directives['font-src'])
-    assert directives['script-src'] == ["'self'"]
-    assert directives['frame-ancestors'] == ["'none'"]
+    # Nothing external and nothing inline: the stylesheet and the script are
+    # served by the app, the pages use system fonts.
+    assert directives == {
+        'default-src': ["'none'"], 'script-src': ["'self'"],
+        'style-src': ["'self'"], 'img-src': ["'self'"],
+        'connect-src': ["'self'"], 'form-action': ["'self'"],
+        'frame-ancestors': ["'none'"], 'base-uri': ["'none'"],
+        'object-src': ["'none'"]}
+    assert 'https:' not in csp and 'http:' not in csp
+    assert 'unsafe' not in csp and 'data:' not in csp
 
 
 def test_unexpected_error_is_500_with_security_headers(make_client):
@@ -417,3 +430,78 @@ def test_missing_download_log_returns_empty(make_client):
     import uuid
     r = client.get(f'/log/download/{uuid.uuid4()}', auth=basic())
     assert r.status_code == 200 and r.text == ''
+
+
+# --- pages for browsers without JavaScript ------------------------------------
+
+HTML = 'text/html,application/xhtml+xml,*/*;q=0.8'
+
+
+def test_refused_args_show_the_editor_again(make_client):
+    client, _ = make_client()
+    before = open(os.path.join(client.app_module.PATHS.config_dir,
+                               'args.conf')).read()
+    r = client.post('/edit/args/save', auth=basic(),
+                    headers={**SAME_ORIGIN, 'Accept': HTML},
+                    data={'args_new': ["--exec 'id' <b>x</b>\n"],
+                          'csrf_token': client.csrf_token})
+    assert r.status_code == 400
+    assert r.headers['content-type'].startswith('text/html')
+    assert 'Not saved' in r.text and '--exec' in r.text
+    # The refused text is kept in the editor, escaped.
+    assert '&lt;b&gt;x&lt;/b&gt;' in r.text and '<b>x</b>' not in r.text
+    assert open(os.path.join(client.app_module.PATHS.config_dir,
+                             'args.conf')).read() == before
+
+
+@pytest.mark.parametrize('page,field,name', [
+    ('/edit/args', 'args_new', 'args.conf'),
+    ('/edit/channels', 'channels_new', 'channels.txt'),
+    ('/edit/archive', 'archive_new', 'archive.txt')])
+def test_edit_pages_show_the_file(make_client, page, field, name):
+    client, _ = make_client()
+    path = os.path.join(client.app_module.PATHS.config_dir, name)
+    with open(path, 'w') as f:
+        f.write('\nfirst line after a blank one <script>\n')
+    r = client.get(page, auth=basic())
+    assert r.status_code == 200
+    assert f'name="{field}"' in r.text
+    assert f'name="csrf_token" value="{client.csrf_token}"' in r.text
+    # One newline after <textarea> is dropped by the HTML parser, so a file
+    # that starts with a blank line keeps it.
+    assert '>\n\nfirst line after a blank one &lt;script&gt;' in r.text
+
+
+def test_browser_errors_are_pages_and_api_errors_json(make_client):
+    client, _ = make_client()
+    page = client.get('/no-such-page', auth=basic(), headers={'Accept': HTML})
+    assert page.status_code == 404
+    assert page.headers['content-type'].startswith('text/html')
+    assert 'Not found' in page.text
+    assert client.get('/no-such-page', auth=basic()).json() == {
+        'detail': 'Not Found'}
+    api = client.get('/api/log/download/x', auth=basic(),
+                     headers={'Accept': HTML})
+    assert api.status_code == 404 and api.json() == {'detail': 'not found'}
+    bad = client.post('/download', auth=basic(),
+                      headers={**SAME_ORIGIN, 'Accept': HTML},
+                      data={'url': 'file:///etc/passwd',
+                            'csrf_token': client.csrf_token})
+    assert bad.status_code == 400 and 'only http(s) URLs' in bad.text
+    # Authentication still answers with the Basic challenge, not a page.
+    r = client.get('/', headers={'Accept': HTML})
+    assert r.status_code == 401 and 'www-authenticate' in r.headers
+
+
+def test_page_carries_settings_in_data_attributes(make_client):
+    client, _ = make_client(WEBUI_MAX_PARALLEL_DOWNLOADS='2',
+                            WEBUI_READONLY='true')
+    html = client.get('/', auth=basic()).text
+    assert f'data-csrf-token="{client.csrf_token}"' in html
+    assert 'data-page="dashboard"' in html and 'data-parallel="2"' in html
+    assert 'data-max-queued="20"' in html and 'data-readonly="true"' in html
+    assert 'read-only' in html
+    job = str(uuid.uuid4())
+    html = client.get(f'/download/{job}', auth=basic()).text
+    assert 'data-page="job"' in html and f'data-download-id="{job}"' in html
+    assert '<details id="log" class="panel fold needs-js" open>' in html

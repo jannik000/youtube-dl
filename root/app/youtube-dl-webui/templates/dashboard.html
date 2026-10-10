@@ -1,34 +1,89 @@
 {% extends "layout.html" %}
+{#- The dashboard and the job page /download/<id>. app.js fills the sections
+    from GET /api/status; without JavaScript only the forms work. #}
+{% block title %}{% if download_id %}Download · youtube-dl{% else %}youtube-dl{% endif %}{% endblock %}
 
 {% block content %}
-<div class="ui container">
-    {% if download_id %}
-    <div class="ui segment">
-        <h3>Download log:</h3>
-        <pre class="logs" id="text"></pre>
+<noscript>
+  <p class="noscript">Live status needs JavaScript. The forms still work, and the plain-text log is at
+  {% if download_id %}<a href="{{ base_path }}/log/download/{{ download_id }}">this download's log</a>{% else %}<a href="{{ base_path }}/log/youtube-dl">the current run's log</a>{% endif %}.</p>
+</noscript>
+
+{% if download_id %}
+<a class="back" href="{{ base_path }}/">← Back to dashboard</a>
+<section id="job" class="panel job-card needs-js" aria-label="Download">
+  <p class="empty-plain">Loading…</p>
+</section>
+{% else %}
+<section id="cards" class="cards needs-js" aria-label="Status"></section>
+
+<section id="now" class="now needs-js" aria-labelledby="now-h">
+  <h2 id="now-h">Now</h2>
+  <div class="now-grid">
+    <div id="sched" class="panel" aria-label="Scheduled run"><p class="empty-plain">Loading…</p></div>
+    <div id="manual" class="panel" aria-label="Manual downloads"><p class="empty-plain">Loading…</p></div>
+  </div>
+</section>
+
+<section id="attention" class="panel attention needs-js" aria-labelledby="att-h" hidden>
+  <div class="row">
+    <h2 id="att-h">Needs attention</h2>
+    <span class="muted small">current and last run · manual downloads</span>
+  </div>
+  <div id="attention-groups" class="stack"></div>
+  <p class="muted small">Skip and failure counts come from the log and can be inflated by unusual video titles.</p>
+</section>
+
+<section id="recent" class="panel needs-js" aria-labelledby="rec-h">
+  <h2 id="rec-h">Recently downloaded</h2>
+  <div id="recent-list" class="list"></div>
+</section>
+
+<details id="channels" class="panel fold needs-js">
+  <summary>Channels <span id="channels-summary" class="muted"></span></summary>
+  <div class="fold-body">
+    <table class="table">
+      <thead><tr><th scope="col">Channel</th><th scope="col">Last checked</th><th scope="col" class="col-last-new">Last new</th><th scope="col">Last run</th><th scope="col">Status</th></tr></thead>
+      <tbody id="channels-rows"></tbody>
+    </table>
+    <p id="channels-empty" class="empty-plain" hidden>Channels appear here after the first run with the dashboard has finished.</p>
+  </div>
+</details>
+
+<details id="runs" class="panel fold needs-js">
+  <summary>Recent runs <span class="muted">· last 10</span></summary>
+  <div class="fold-body">
+    <table class="table">
+      <thead><tr><th scope="col">Start</th><th scope="col">Duration</th><th scope="col">New</th><th scope="col">Skipped</th><th scope="col">Failed</th><th scope="col">Result</th></tr></thead>
+      <tbody id="runs-rows"></tbody>
+    </table>
+    <p id="runs-empty" class="empty-plain" hidden>No run recorded yet.</p>
+  </div>
+</details>
+{% endif %}
+
+<details id="log" class="panel fold needs-js"{% if download_id %} open{% endif %}>
+  <summary id="log-title">{% if download_id %}Log · this download{% else %}Log · current run{% endif %}</summary>
+  <div class="fold-body">
+    <div class="log-tools">
+      <label class="source">Source
+        <select id="log-source">
+          {% if download_id %}<option value="job:{{ download_id }}">This download</option>{% endif %}
+          <option value="run">Current run</option>
+        </select>
+      </label>
+      <div class="seg" role="group" aria-label="Filter">
+        <button type="button" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" data-filter="noskip" aria-pressed="false">Hide archive skips</button>
+        <button type="button" data-filter="errors" aria-pressed="false">Errors &amp; warnings</button>
+      </div>
+      <label class="check"><input type="checkbox" id="log-follow" checked>Follow</label>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-s" id="log-copy">Copy</button>
+      <a class="btn btn-s" id="log-download" href="{% if download_id %}{{ base_path }}/log/download/{{ download_id }}{% else %}{{ base_path }}/log/youtube-dl{% endif %}" download="youtube-dl.log">Download .log</a>
     </div>
-    <div id="log-config" data-base-path="{{ base_path }}" data-download-id="{{ download_id }}"></div>
-    {% else %}
-    <div class="ui ">
-        <h3>Log:</h3>
-        <pre class="logs" id="text"></pre>
-    </div>
-    <div id="log-config" data-base-path="{{ base_path }}" data-download-id=""></div>
-    {% endif %}
-</div>
-<script src="{{ base_path }}/static/app.js"></script>
-<style>
-    .logs {
-        white-space: pre-wrap;
-        word-wrap: break-word;
-        max-width: 100%;
-        overflow-wrap: break-word;
-        word-break: break-word;
-        padding: 10px;
-        border: 1px solid #ccc;
-        background-color: #f5f5f5;
-        max-height: 600px;
-        overflow-y: auto;
-    }
-</style>
+    <div id="log-body" class="log-body" role="log" aria-label="Log output" tabindex="0"></div>
+    <p id="log-note" class="log-note" hidden></p>
+  </div>
+</details>
 {% endblock %}

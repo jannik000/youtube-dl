@@ -8,7 +8,9 @@ import aiofiles
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse, Response)
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pathlib import Path
 
 import dashboard
@@ -20,7 +22,7 @@ import ytdlp_args
 LOG_TAIL_BYTES = 256 * 1024
 
 # Routes reachable without credentials (no data, needed before login).
-PUBLIC_PATHS = frozenset({'/favicon.ico', '/static/app.js'})
+PUBLIC_PATHS = frozenset({'/favicon.ico', '/static/app.js', '/static/app.css'})
 # The only routes that accept the API token (the iOS shortcut).
 TOKEN_ROUTES = frozenset({('POST', '/download'), ('POST', '/api/download')})
 
@@ -133,6 +135,41 @@ def _join_form_lines(lines):
     return ''.join(line.replace('\r\n', '\n') for line in lines)
 
 
+def _wants_html(request):
+    """True for a browser navigation (a form without JavaScript, a typed
+    URL): it gets an HTML page instead of JSON. The script and API clients
+    send Accept: application/json (or */*)."""
+    path = _route_path(request.scope)
+    if path.startswith(('/api/', '/log/', '/static/')):
+        return False
+    return 'text/html' in request.headers.get('accept', '').lower()
+
+
+# The three configuration editors (templates/edit.html).
+EDIT_PAGES = {
+    'args': {'heading': 'Args', 'filename': '/config/args.conf',
+             'field': 'args_new', 'action': '/edit/args/save',
+             'hint': 'yt-dlp options for every scheduled run, one or more '
+                     'per line. Options that run commands or write outside '
+                     '/downloads and /config are refused.'},
+    'channels': {'heading': 'Channels', 'filename': '/config/channels.txt',
+                 'field': 'channels_new', 'action': '/edit/channels/save',
+                 'hint': 'One URL per line; "URL | options" adds yt-dlp '
+                         'options for that entry. Lines starting with # '
+                         'are comments.'},
+    'archive': {'heading': 'Archive', 'filename': '/config/archive.txt',
+                'field': 'archive_new', 'action': '/edit/archive/save',
+                'hint': 'Videos listed here ("extractor id" per line) are '
+                        'not downloaded again.'},
+}
+
+_ERROR_TITLES = {
+    400: 'Bad request', 403: 'Not allowed', 404: 'Not found',
+    409: 'Please confirm', 429: 'Queue is full',
+    503: 'Not available right now',
+}
+
+
 def create_app():
     config = webui_security.Config()
     startup_error = config.startup_error()
@@ -220,10 +257,39 @@ def create_app():
 
     def context(request, extra=None):
         ctx = {'base_path': BASE_PATH, 'csrf_token': config.csrf_token,
-               'readonly': config.readonly}
+               'readonly': config.readonly, 'page': 'dashboard',
+               'download_id': '', 'parallel': config.max_parallel,
+               'max_queued': manager.max_queued}
         if extra:
             ctx.update(extra)
         return ctx
+
+    def error_page(request, status_code, message, headers=None, **extra):
+        """An HTML error answer for a browser navigation."""
+        tone = 'tone-warn' if status_code in (409, 429, 503) else 'tone-err'
+        return templates.TemplateResponse(
+            request, 'error.html',
+            context(request, {
+                'page': 'error', 'status_code': status_code,
+                'title': _ERROR_TITLES.get(status_code, 'Something went wrong'),
+                'message': message, 'tone': tone, **extra}),
+            status_code=status_code, headers=headers)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def html_or_json_error(request, exc):
+        # API clients and the script keep FastAPI's JSON answer.
+        if not _wants_html(request) or exc.status_code == 401:
+            return await http_exception_handler(request, exc)
+        detail = exc.detail if isinstance(exc.detail, str) else ''
+        return error_page(request, exc.status_code, detail,
+                          headers=getattr(exc, 'headers', None))
+
+    def edit_page(request, name, content, error='', status_code=200):
+        return templates.TemplateResponse(
+            request, 'edit.html',
+            context(request, dict(EDIT_PAGES[name], page='edit',
+                                  content=content, error=error)),
+            status_code=status_code)
 
     def job_answer(ticket):
         """JSON of a job ticket: {id, state, position, message}."""
@@ -250,7 +316,10 @@ def create_app():
             raise HTTPException(status.HTTP_403_FORBIDDEN,
                                 'configuration editing is disabled (WEBUI_READONLY)')
 
-    async def save_validated(request, path, lines, validator, auth_kind, token):
+    async def save_validated(request, name, path, lines, validator,
+                             auth_kind, token):
+        """Save a configuration file; None on success, else the editor
+        again with the refused content and the validation error (400)."""
         webui_security.enforce_csrf(request, config, auth_kind, token)
         require_writable()
         content = _join_form_lines(lines)
@@ -258,9 +327,11 @@ def create_app():
             try:
                 validator(content)
             except ytdlp_args.ArgsError as err:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(err))
+                return edit_page(request, name, content, error=str(err),
+                                 status_code=status.HTTP_400_BAD_REQUEST)
         async with aiofiles.open(path, 'w') as f:
             await f.write(content)
+        return None
 
     @app.get('/favicon.ico')
     async def favicon():
@@ -272,6 +343,11 @@ def create_app():
     async def app_js():
         return FileResponse(f'{PATHS.app_dir}/static/app.js',
                             media_type='text/javascript')
+
+    @app.get('/static/app.css')
+    async def app_css():
+        return FileResponse(f'{PATHS.app_dir}/static/app.css',
+                            media_type='text/css')
 
     @app.get('/')
     async def dashboard_page(request: Request, _=Depends(require_auth)):
@@ -287,6 +363,11 @@ def create_app():
         try:
             ticket = await queue_download(url, auth_kind, force)
         except jobs.JobError as err:
+            if auth_kind != 'token' and _wants_html(request):
+                response = job_error(err)
+                return error_page(request, response.status_code, str(err),
+                                  headers={'Retry-After': '60'} if
+                                  'retry-after' in response.headers else None)
             return job_error(err)
         if auth_kind == 'token':
             # API clients cannot follow the redirect to the Basic-auth status
@@ -364,7 +445,7 @@ def create_app():
         _validate_id(download_id)
         return templates.TemplateResponse(
             request, 'dashboard.html',
-            context(request, {'download_id': download_id}))
+            context(request, {'download_id': download_id, 'page': 'job'}))
 
     @app.get('/api/status')
     async def api_status(request: Request, _=Depends(require_auth)):
@@ -408,6 +489,12 @@ def create_app():
         aborts it, so the client must confirm (409 without confirm=1)."""
         webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
         if not _truthy(confirm) and await asyncio.to_thread(dash.pass_running):
+            if _wants_html(request):
+                return error_page(
+                    request, status.HTTP_409_CONFLICT,
+                    'A scheduled run is in progress. Abort it and start '
+                    'over? Videos that are already finished stay in the '
+                    'archive.', confirm_restart=True)
             return JSONResponse(
                 {'detail': 'A scheduled run is in progress. Send confirm=1 '
                            'to abort it and start over.'},
@@ -420,30 +507,33 @@ def create_app():
 
     @app.get('/edit/args')
     async def edit_args(request: Request, _=Depends(require_auth)):
-        return templates.TemplateResponse(
-            request, 'args.html',
-            context(request, {'args': await _read_file(PATHS.args_file)}))
+        return edit_page(request, 'args', await _read_file(PATHS.args_file))
 
     @app.post('/edit/args/save')
     async def save_args(request: Request, auth_kind=Depends(require_auth),
                         args_new: list = Form(...), csrf_token: str = Form('')):
-        await save_validated(request, PATHS.args_file, args_new,
-                             ytdlp_args.validate_args_conf, auth_kind, csrf_token)
+        refused = await save_validated(
+            request, 'args', PATHS.args_file, args_new,
+            ytdlp_args.validate_args_conf, auth_kind, csrf_token)
+        if refused is not None:
+            return refused
         return RedirectResponse(url=f'{BASE_PATH}/edit/args',
                                 status_code=status.HTTP_303_SEE_OTHER)
 
     @app.get('/edit/channels')
     async def edit_channels(request: Request, _=Depends(require_auth)):
-        return templates.TemplateResponse(
-            request, 'channels.html',
-            context(request, {'channels': await _read_file(PATHS.channels_file)}))
+        return edit_page(request, 'channels',
+                         await _read_file(PATHS.channels_file))
 
     @app.post('/edit/channels/save')
     async def save_channels(request: Request, auth_kind=Depends(require_auth),
                             channels_new: list = Form(...),
                             csrf_token: str = Form('')):
-        await save_validated(request, PATHS.channels_file, channels_new,
-                             ytdlp_args.validate_channels, auth_kind, csrf_token)
+        refused = await save_validated(
+            request, 'channels', PATHS.channels_file, channels_new,
+            ytdlp_args.validate_channels, auth_kind, csrf_token)
+        if refused is not None:
+            return refused
         return RedirectResponse(url=f'{BASE_PATH}/edit/channels',
                                 status_code=status.HTTP_303_SEE_OTHER)
 
@@ -451,9 +541,8 @@ def create_app():
     async def edit_archive(request: Request, _=Depends(require_auth)):
         if not Path(PATHS.archive_file).exists():
             Path(PATHS.archive_file).touch()
-        return templates.TemplateResponse(
-            request, 'archive.html',
-            context(request, {'archive': await _read_file(PATHS.archive_file)}))
+        return edit_page(request, 'archive',
+                         await _read_file(PATHS.archive_file))
 
     @app.post('/edit/archive/save')
     async def save_archive(request: Request, auth_kind=Depends(require_auth),

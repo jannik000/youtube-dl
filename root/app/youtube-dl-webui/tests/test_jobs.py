@@ -26,6 +26,7 @@ SAME_ORIGIN = {'Sec-Fetch-Site': 'same-origin'}
 VID = 'dQw4w9WgXcQ'
 WATCH = f'https://www.youtube.com/watch?v={VID}'
 TICKET = {'id', 'state', 'position', 'message'}
+HTML = 'text/html,application/xhtml+xml,*/*;q=0.8'
 
 
 def api(client, url, **data):
@@ -34,7 +35,8 @@ def api(client, url, **data):
 
 
 def browser(client, path, data=None, **kwargs):
-    return client.post(path, auth=basic(), headers=SAME_ORIGIN,
+    kwargs.setdefault('headers', SAME_ORIGIN)
+    return client.post(path, auth=basic(),
                        data={**(data or {}), 'csrf_token': client.csrf_token},
                        **kwargs)
 
@@ -120,9 +122,15 @@ def test_queue_holds_one_running_and_twenty_waiting(job_client):
     full = api(client, 'https://example.com/v21')
     assert full.status_code == 429 and full.headers['retry-after'] == '60'
     assert full.json()['message'] == 'Queue is full (20 waiting). Try again later.'
-    # The browser form is refused the same way.
+    # The browser form is refused the same way: JSON for the script, a page
+    # for a form sent without JavaScript.
     assert browser(client, '/download', {'url': 'https://example.com/v22'}
                    ).status_code == 429
+    page = browser(client, '/download', {'url': 'https://example.com/v22'},
+                   headers={**SAME_ORIGIN, 'Accept': HTML})
+    assert page.status_code == 429 and page.headers['retry-after'] == '60'
+    assert page.headers['content-type'].startswith('text/html')
+    assert 'Queue is full (20 waiting)' in page.text
     assert len(fake.procs) == 1
     shown = status(client)
     assert [j['position'] for j in shown['jobs']['queued']] == list(range(1, 21))
@@ -591,6 +599,13 @@ def test_run_now_asks_while_a_pass_runs(make_client):
         f.write(b'/bin/bash\0/app/youtube-dl/youtube-dl.sh\0')
     r = browser(client, '/restart-youtube-dl', follow_redirects=False)
     assert r.status_code == 409 and 'confirm=1' in r.json()['detail']
+    # Without JavaScript the form gets a page that asks, with a form that
+    # confirms (and carries the CSRF token).
+    page = browser(client, '/restart-youtube-dl', follow_redirects=False,
+                   headers={**SAME_ORIGIN, 'Accept': HTML})
+    assert page.status_code == 409
+    assert 'name="confirm" value="1"' in page.text
+    assert f'name="csrf_token" value="{client.csrf_token}"' in page.text
     assert 'argv' not in captured
     r = browser(client, '/restart-youtube-dl', {'confirm': '1'},
                 follow_redirects=False)
