@@ -1,6 +1,7 @@
 # Security Review – jannik000/youtube-dl
 
 Stand: 2026-10-07 · Basis: Upstream `Jeeaaasus/youtube-dl` @ `69c3b69` (yt-dlp 2026.08.19)
+Ergänzt 2026-10-10 um das Dashboard (R30–R36, Abschnitt „Dashboard“).
 
 ## Umfang und Bedrohungsmodell
 
@@ -37,8 +38,8 @@ Die mit „verifiziert“ markierten Befunde wurden lokal gegen den unverändert
 | W6 | Codeausführung über `args.conf`/`channels.txt` (yt-dlp-Optionen) | `save_args()`, `save_channels()` | Hoch | gemindert |
 | W7 | SSRF: beliebige Ziel-URLs | `download_url()` | Mittel | gemindert |
 | W8 | Log-Endpunkte: Informationsleck, ungeprüfte IDs, Volllast-Polling | `/log/*`, `dashboard.html` | Niedrig | behoben |
-| W9 | Fehlende Security-Header (Clickjacking, CSP) | Web-UI | Niedrig | behoben |
-| W10 | Unbegrenzte parallele Downloads, Logs in `/tmp` wachsen | `download_url()` | Niedrig | dokumentiert |
+| W9 | Fehlende Security-Header (Clickjacking, CSP) | Web-UI | Niedrig | behoben (CSP verschärft, R33) |
+| W10 | Unbegrenzte parallele Downloads, Logs in `/tmp` wachsen | `download_url()` | Niedrig | behoben (R30) |
 | S1 | `eval` der `\|`-Args aus `channels.txt` | `youtube-dl.sh` | Hoch | behoben |
 | S2 | Shell-Expansion von `--output`-Zeilen aus `args.conf` | `youtube-dl.sh` | Hoch | behoben |
 | S3 | Env-Werte werden als Befehle ausgeführt (`if $var`) | `youtube-dl.sh`, `80-webui` | Info | behoben |
@@ -111,6 +112,19 @@ Supervisor 4.2.5 mit Stub-Skript, `download_bg()` mit Python-Kindprozess statt y
 | R28 | `root/etc/supervisor/conf.d/youtube-dl.conf`: `supervisorctl restart youtube-dl` (Web-UI „Restart youtube-dl“, `POST /restart-youtube-dl`) beendete nur das äußere `bash -c`. `youtube-dl.sh`, sein yt-dlp und `tee` liefen verwaist weiter, neben dem neuen Durchlauf (gleiches Archiv, gleiche Dateien, doppelte Anfragen an YouTube; das alte `tee` schrieb weiter in das vom neuen gekürzte Log). Fix: `stopasgroup`/`killasgroup`: Stop und Restart durch supervisord schicken SIGTERM an die ganze Gruppe. SIGKILL an die Gruppe folgt nur, wenn `bash -c` nach `stopwaitsecs` noch läuft; ein Mitglied, das SIGTERM ignoriert (etwa ein Nutzer-Skript mit `trap '' TERM`), überlebt deshalb, und ein unerwarteter Tod von `bash -c` erreicht die Gruppe gar nicht. Folge in `root/app/youtube-dl/youtube-dl.sh`: Der Zweig für `youtubedl_interval=false` startet nur noch `terminate` und wartet dann (`sleep infinity`); `supervisorctl stop all` hätte das Skript jetzt selbst beendet, bevor `terminate` startet (Container endet nie), ein Beenden des Skripts hätte per `autorestart` einen zweiten Durchlauf begonnen. Exit-Code des Containers wie bisher 0 (supervisord endet nach SIGQUIT mit 0). E2E: Szenario A prüft, dass der Restart wirklich einen neuen Durchlauf startet, und danach genau ein `youtube-dl.sh` und ein `tee`; Szenario E den Ein-Durchlauf-Modus (genau ein Start durch supervisord, Container beendet mit 0) | Mittel (Betrieb) | behoben |
 | R29 | `root/app/youtube-dl-webui/youtube-dl-webui.py` `download_bg()`: Die Ausgabe wurde zeilenweise gelesen; eine Zeile über 64 KiB (Fortschritt ohne `--newline` in `args.conf`, langes `--print`) brach das Lesen mit `ValueError` ab. Danach las niemand mehr die Pipe: Sobald sie voll war, blockierte yt-dlp für immer, und der Prozess wurde nie abgewartet; das Log endete nach den bis dahin gelesenen Zeilen mit `Error: Separator is (not) found …`. Fix: Kopieren in 64-KiB-Blöcken mit inkrementellem UTF-8-Decoder bis EOF, danach `wait()`. yt-dlp läuft in einer eigenen Session; bei Fehler oder Abbruch der Task wird diese Prozessgruppe getötet (auch ffmpeg und externe Downloader, die yt-dlps Ausgabe teilen), die Pipe geleert und yt-dlp abgewartet (vor Python 3.13 kehrt `wait()` in asyncio erst zurück, wenn die Pipe geschlossen ist; das Image nutzt 3.11). Tests: `root/app/youtube-dl-webui/tests/test_download_bg.py`, mit asyncio und uvloop | Niedrig (Betrieb) | behoben |
 
+Mit dem Dashboard (Branch `dashboard-wip`) kamen neue Routen, eine Ereignisdatei und eine
+Warteschlange hinzu. Geprüft und umgesetzt wurde (Details im Abschnitt „Dashboard“):
+
+| ID | Befund / Maßnahme | Schweregrad | Status |
+| :--- | :--- | :---: | :--- |
+| R30 | W10: unbegrenzte parallele Downloads, Logs in `/tmp`. Jetzt begrenzte Warteschlange mit `429`, Abbruch, Wiederholen und Wiederaufnahme nach Neustart; Job-Logs in `/config/.youtube-dl-status/jobs/` (neueste 50). Die Garantien aus R29 (Blocklesen, eigene Prozessgruppe, Gruppe töten, Pipe leeren, warten) gelten im Job-Manager weiter | Niedrig | behoben |
+| R31 | Videotitel können yt-dlp-Logzeilen nachahmen (`[download] … has already been recorded`, `ERROR: … Sign in to confirm you’re not a bot`) und so Zähler und Fehlerursachen fälschen. Maßnahme: Nonce pro Durchlauf, nur Zeilen mit Nonce zählen; Erfolg und Misserfolg nur aus Ereignissen; die Nonce verlässt den Server nie | Niedrig | gemindert |
+| R32 | Neue Lese- und Schreib-Routen (Status, inkrementelle Logs, Abbruch, Wiederholen, *Download now*, *Run now*): Auth-Matrix festgelegt, der API-Token bleibt auf `TOKEN_ROUTES` beschränkt | Mittel | behoben |
+| R33 | CSP erlaubte `'unsafe-inline'` für Styles und externe Hosts (CDN, Google Fonts); jetzt `default-src 'none'`, alles nur `'self'`, keine Inline-Skripte oder -Styles | Niedrig | behoben |
+| R34 | Statusverzeichnis: Dateien, die der Web-UI-Prozess liest und der Downloader schreibt, dürfen nicht über Symlinks umgelenkt oder von Nutzeroptionen überschrieben werden | Niedrig | behoben |
+| R35 | Ereignis-Flags dürfen die Options-Prüfung (W6) nicht aufweichen und nicht still an yt-dlp-Änderungen zerbrechen | Niedrig | behoben |
+| R36 | Cookie-Anzeige: Werte aus `cookies.txt` dürfen die Web-UI nicht verlassen | Niedrig | behoben |
+
 ---
 
 ## Web-UI
@@ -149,12 +163,13 @@ reproduziert: `args.conf` ließ sich ohne Zugangsdaten mit beliebigem Inhalt üb
 **Fix:**
 - Browser: HTTP Basic Auth (`WEBUI_USERNAME`, `WEBUI_PASSWORD`).
 - Kurzbefehl/Skripte: `Authorization: Bearer <WEBUI_API_TOKEN>`. Der Token gilt **nur** für
-  `POST /download` und `POST /api/download` (beide antworten bei Token-Auth mit JSON `{"id": …}`),
-  nicht für Logs, Restart oder Config. Ein gestohlener Token (A3) erlaubt also nur Downloads.
+  `POST /download` und `POST /api/download` (beide antworten bei Token-Auth mit JSON
+  `{"id", "state", "position", "message"}`), nicht für Status, Logs, Restart, Abbruch oder Config. Ein gestohlener Token (A3) erlaubt also nur Downloads.
 - Die Prüfung läuft in einer Middleware anhand der Header, **bevor** eine Route oder das
   Body-Parsing startet. Bodies nicht authentifizierter Clients werden nie gelesen oder nach `/tmp`
-  gespoolt. Ohne Login erreichbar sind nur `/favicon.ico` und `/static/app.js`; auch unbekannte
-  Routen liefern 401. Die Routen prüfen zusätzlich selbst (zweite Schicht).
+  gespoolt. Ohne Login erreichbar sind nur `/favicon.ico`, `/static/app.js` und
+  `/static/app.css`; auch unbekannte Routen liefern 401. Die Routen prüfen zusätzlich selbst
+  (zweite Schicht). Die vollständige Matrix mit den Dashboard-Routen steht unter R32.
 - Die automatische API-Doku von FastAPI (`/docs`, `/redoc`, `/openapi.json`) ist abgeschaltet.
 - Vergleich mit `secrets.compare_digest` auf Bytes.
 - Fail closed: Ist die Web-UI aktiv, aber weder Basic-Zugangsdaten noch Token gesetzt (oder nur
@@ -271,7 +286,7 @@ Fehlermeldungen. Beide Log-Endpunkte liefern nur die letzten 256 KiB, das Pollin
 **Befund:** Kein `frame-ancestors`/`X-Frame-Options`, also Clickjacking auf „Save“/„Restart“ möglich.
 Keine CSP. Das Semantic-UI-CSS kommt vom CDN ohne SRI.
 
-**Fix:** Middleware setzt:
+**Fix (erste Fassung, mit dem Dashboard ersetzt, siehe R33):** Middleware setzt:
 - `Content-Security-Policy`: `default-src 'self'`, `script-src 'self'` (keine Inline-Skripte),
   `style-src 'self' 'unsafe-inline'` (Style-Attribute in den Templates) plus `cdn.jsdelivr.net`
   und `fonts.googleapis.com`, `font-src 'self' data:` plus `cdn.jsdelivr.net` und
@@ -284,14 +299,23 @@ Keine CSP. Das Semantic-UI-CSS kommt vom CDN ohne SRI.
 - `Referrer-Policy: same-origin`
 - `X-Frame-Options: DENY`
 
-Das CDN-Stylesheet bleibt; per CSP ist es auf CSS/Fonts beschränkt.
+Das CDN-Stylesheet blieb zunächst; per CSP war es auf CSS/Fonts beschränkt. Mit dem Dashboard ist
+Semantic UI entfernt, und die CSP lautet nur noch
+`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'`
+(R33).
 
 ### W10 – Ressourcenverbrauch · Niedrig
 
 Jeder Download-Request startet einen eigenen yt-dlp-Prozess ohne Obergrenze. Wegen
 `--playlist-end -1` lädt eine Kanal- oder Playlist-URL den kompletten Kanal. Pro Download bleibt eine
 Logdatei in `/tmp` liegen. Nach Einführung der Auth können das nur noch Berechtigte auslösen;
-dokumentiert, nicht geändert.
+zunächst dokumentiert, nicht geändert.
+
+**Fix (Dashboard, R30):** Manuelle Downloads laufen über eine begrenzte Warteschlange
+(`jobs.py`): höchstens `WEBUI_MAX_PARALLEL_DOWNLOADS` (1–3, Standard 1) gleichzeitig, höchstens 20
+wartend, danach `429` mit `Retry-After: 60`. Dieselbe URL wird nicht doppelt eingereiht. Job-Logs
+liegen in `/config/.youtube-dl-status/jobs/`, nur die neuesten 50 bleiben. Ein ganzer Kanal über
+eine Kanal-URL bleibt möglich (gewollt), läuft aber nur noch in einem der Slots.
 
 ---
 
@@ -482,6 +506,106 @@ geht er in einen `sed`-Ausdruck auf das `Dockerfile` und in Image-Tags. **Fix:**
 
 ---
 
+## Dashboard
+
+### R30 – Begrenzte Warteschlange für manuelle Downloads
+
+`jobs.py` ersetzt `download_bg()` und `BackgroundTasks`. Ein `JobManager` pro Prozess (uvicorn läuft
+mit genau einem Worker; mehrere Worker würden Warteschlange und Dashboard zerlegen) hält höchstens
+20 wartende und `WEBUI_MAX_PARALLEL_DOWNLOADS` (1–3) laufende Jobs. Eine volle Warteschlange
+liefert `429` mit `Retry-After: 60`, während des Herunterfahrens `503`. Abbruch schickt SIGTERM an
+die Prozessgruppe von yt-dlp und 10 s später SIGKILL; das Herunterfahren der Web-UI tut dasselbe
+schneller, damit supervisord (`stopwaitsecs=15`) keine Reste hinterlässt. Nach einem Neustart werden
+wartende Jobs (höchstens einen Tag alt) erneut validiert und eingereiht, laufende als `interrupted`
+markiert. Wiederholen prüft die URL erneut (eine inzwischen geänderte Allowlist greift).
+
+Manuelle Downloads nutzen jetzt `cookies.txt` und das Archiv (Entscheidung des Betreibers). Ein
+archiviertes YouTube-Video wird ohne yt-dlp-Start beantwortet; *Re-download* setzt
+`--no-download-archive`, damit auch ein in `args.conf` gesetztes Archiv nicht greift.
+
+**Restrisiko:** Wird uvicorn per SIGKILL beendet, bevor sein Shutdown fertig ist, läuft ein gerade
+laufendes yt-dlp (eigene Session) weiter, bis es fertig ist; der Job erscheint nach dem Neustart als
+`interrupted`.
+
+### R31 – Gefälschte Logzeilen, Nonce
+
+Das Dashboard liest den Fortschritt eines Durchlaufs aus dem Log. Ein Videotitel steht dort im
+Klartext und kann deshalb ganze Logzeilen nachahmen; der Test-Fixture `forged-title` erzeugt so drei
+falsche Archiv-Treffer und einen falschen „Bot check“ mit einer frei gewählten Video-ID.
+
+Maßnahmen:
+- `youtube-dl.sh` holt pro Durchlauf eine zufällige Nonce (`status_events.py begin`, 16–32
+  Hex-Zeichen, geprüft). Kanalmarker und die Fortschrittszeilen von yt-dlp tragen sie
+  (`@@ytdl:<nonce>`); nur Zeilen mit der richtigen Nonce gelten.
+- Neue Videos und Fehlschläge kommen aus den Ereignissen von `--print-to-file` (eigene Datei, nicht
+  aus dem Log). Ein Kanal gilt nur bei Exit-Code ≠ 0 als fehlgeschlagen.
+- Die Nonce steht nur in `run_start` in `events.jsonl` (0600) und verlässt den Server nie: Status-JSON
+  aus expliziten Feldern, Log-Ausgaben (`/log/*`, `/api/log/*`) nur als vollständige Zeilen, aus
+  denen Nonce-Suffixe, Marker, eigene Postprocess-Zeilen und `[info] Writing '{"v":1`-Zeilen entfernt
+  und jede weitere `@@ytdl:<hex>` maskiert werden. Ein `since` mitten in einer Zeile springt zur
+  nächsten, damit kein Teil einer Nonce sichtbar wird. Tests und E2E durchsuchen alle Leserouten
+  nach der Nonce.
+- *Download now* aus „Needs attention“ übernimmt nur eine 11-stellige YouTube-ID, baut daraus eine
+  Watch-URL und validiert sie wie jede andere URL; es braucht den Klick des Nutzers (CSRF).
+
+**Restrisiko (kosmetisch):** Archiv- und Filter-Zähler sowie die Fehlerursache stammen weiterhin aus
+Logzeilen und können durch Titel aufgebläht werden; die UI kennzeichnet sie mit „from log“. Mit
+`--quiet` des Nutzers zeigen sie 0.
+
+### R32 – Auth-Matrix
+
+| Route | Basic Auth | API-Token | ohne |
+| :--- | :---: | :---: | :---: |
+| `POST /download`, `POST /api/download` | ja (Browser: CSRF-Token + `Sec-Fetch-Site`) | ja (JSON, CSRF-frei) | 401 |
+| Seiten, `GET /api/status`, `GET /api/log/youtube-dl`, `GET /api/log/download/{id}`, `GET /log/*` | ja | 401 | 401 |
+| `POST /api/download/{id}/cancel`, `…/retry`, `POST /api/download-now`, `POST /restart-youtube-dl`, `POST /edit/*/save` | ja, mit CSRF-Token + `Sec-Fetch-Site` | 401 | 401 |
+| `/favicon.ico`, `/static/app.js`, `/static/app.css` | öffentlich | öffentlich | öffentlich |
+
+Die Middleware prüft weiterhin vor Routing und Body-Parsing; `TOKEN_ROUTES` ist unverändert. Ein
+Test stellt sicher, dass jede POST-Route im CSRF-Test vorkommt. Der Token kann den Status eines Jobs
+nicht lesen (bewusst, Entscheidung D3). `POST /restart-youtube-dl` antwortet während eines laufenden
+Durchlaufs mit `409`, solange nicht `confirm=1` mitkommt. `/api/status` liefert ETag/`304` und
+`Cache-Control: no-store`.
+
+### R33 – CSP verschärft
+
+`default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self';
+form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'`. Semantic UI, CDN und
+Google Fonts sind entfernt, CSS liegt in `static/app.css`, JS in `static/app.js` (beide per Route).
+Templates haben keine Inline-Skripte, `style=`-Attribute, `<style>`-Blöcke oder `|safe`; das Skript
+setzt Servertexte (Titel, Kanalnamen, URLs, Logzeilen, Fehlermeldungen) nur über `textContent`
+bzw. DOM-Properties, nie über `innerHTML` & Co., und setzt per CSSOM nur Breiten und Höhen.
+`tests/test_frontend_static.py` prüft das, das E2E die ausgelieferte CSP.
+
+### R34 – Statusverzeichnis
+
+`/config/.youtube-dl-status` (0700) mit `events.jsonl` (0600, Rotation bei 2 MiB, ein `.1`) und
+`jobs/` (0700, Logs 0600). Alles läuft als `abc`; `/app` bleibt root-eigen. Geöffnet wird mit
+`O_NOFOLLOW` (auch für das Verzeichnis), Schreiben mit `O_APPEND` und einem `write()` pro Ereignis
+(höchstens 32 KiB), Lesen nur regulärer Dateien. Die Options-Prüfung lehnt Nutzeroptionen ab, die in
+das Verzeichnis schreiben würden (`-o`, `--print-to-file`, `-P temp:`, `--download-archive`), weil sie
+außerhalb von `/downloads` liegen; Tests sichern das. Mit ausgeschalteter Web-UI wird nichts
+geschrieben (E2E Szenario E). E2E Szenario A prüft Besitzer (`PUID` 1026) und Modus.
+
+### R35 – Ereignis-Flags
+
+Die Flags kommen nur aus `status_events.ytdlp_flags()` und werden von vertrauenswürdigem Code
+**nach** den Nutzer-Argumenten und vor `--` angehängt; die Options-Prüfung (W6) ist unverändert.
+`--print-to-file` statt `--print` (impliziert `--quiet`), keine `playlist:`-Stufe, keine
+verschachtelten Dict-Templates (liefern `NA`). Jede Hilfsaufruf-Störung schlägt offen fehl: der
+Durchlauf läuft dann wie ohne Web-UI. `tests/test_ytdlp_contract.py` lässt das echte yt-dlp gegen
+einen Loopback-Server laufen; mit `YTDLP_CONTRACT_VERSION` (gesetzt in `ci.yml` und im `verify`-Job
+von `release.yml`) schlägt er fehl statt übersprungen zu werden, wenn yt-dlp fehlt oder eine andere
+Version installiert ist. Eine yt-dlp-Änderung, die die Ereignisse bricht, blockiert so die
+Veröffentlichung. Mit `youtubedl_autoupdate=true` kommen neue Versionen ungeprüft; dann bleiben
+höchstens die Balken leer, Downloads laufen weiter.
+
+### R36 – Cookie-Karte
+
+Die Web-UI liest `cookies.txt` nur, um Namen bekannter Login-Cookies und deren Ablauf zu zeigen.
+Werte verlassen den Parser nie; ein Test prüft, dass der Statusteil `cookies` genau aus Anzahl,
+Namen, Ablauf und den Bot-Check-Angaben besteht.
+
 ## Grenzen der Options-Prüfung (W6)
 
 Die Prüfung beim Speichern ist **Defense in Depth, keine Sandbox**. Die eigentliche Schutzgrenze ist:
@@ -538,3 +662,5 @@ Grenzen:
 - `WEBUI_ALLOWED_DOMAINS` setzen, wenn nur YouTube heruntergeladen wird.
 - `WEBUI_READONLY=true`, wenn die Config nur selten geändert wird.
 - C5 (Pins und Hashes für ffmpeg/deno/Basis-Image) bei Gelegenheit umsetzen.
+- uvicorn mit genau einem Worker betreiben (Warteschlange und Dashboard leben im Prozess).
+- `youtubedl_autoupdate` aus lassen: neue yt-dlp-Versionen umgehen sonst den Contract-Test (R35).
