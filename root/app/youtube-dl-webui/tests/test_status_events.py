@@ -739,3 +739,34 @@ def test_channel_commands(tmp_path, capsys):
     assert se.main(['channel-start', f'--status-dir={status_dir}', f'--run={RUN}',
                     '--nonce=x', '--index=1', '--total=1']) == 1
     assert capsys.readouterr().out == ''
+
+
+def test_started_videos_keep_their_extractor_for_download_now():
+    """A video that fails after its start event (a bot check under
+    --ignore-no-formats-error, a 403 on the media) still names its
+    extractor, so the dashboard can offer 'Download now'."""
+    bot, media, other = 'abcdefghijk', 'ABCDEFGHIJK', 'zzzzzzzzzzz'
+    p = se.LogParser(NONCE, run=RUN)
+    p.add_events([_start(bot), _end(bot),
+                  _start(media, webpage_url=se.YOUTUBE_WATCH + media),
+                  _end(media),
+                  _start(other, webpage_url='https://evil.example/watch?v=' + other),
+                  _end(other)])
+    for line in [
+            _marker('start', 1, total=1, url='https://x/'),
+            _writing('start'),
+            f'ERROR: [youtube] {bot}: No video formats found!',
+            _writing('end'),
+            _writing('start'),
+            'ERROR: unable to download video data: HTTP Error 403: Forbidden',
+            _writing('end'),
+            _writing('start'),
+            'ERROR: unable to download video data: HTTP Error 403: Forbidden',
+            _writing('end'),
+            _marker('end', 1, rc=1, secs=3)]:
+        p.feed(line)
+    p.finish()
+    errors = {e['id']: e for e in p.summary()['err']}
+    assert errors[bot]['ie'] == 'youtube'
+    assert errors[media]['ie'] == 'youtube'
+    assert 'ie' not in errors[other]

@@ -87,6 +87,9 @@ START_FIELDS = (
 END_FIELDS = ('id', 'title', 'channel', 'epoch',
               'requested_downloads.:.filepath')
 
+# yt-dlp's webpage_url of a YouTube video, followed by its id.
+YOUTUBE_WATCH = 'https://www.youtube.com/watch?v='
+
 # Layout of the per-channel rows in run_end.ch.
 CHANNEL_ROW = ('idx', 'new', 'skipped', 'failed', 'filtered', 'rc', 'secs',
                'ts', 'url')
@@ -816,6 +819,14 @@ class LogParser:
             for key in ('title', 'url'):
                 if video.get(key):
                     error[key] = video[key]
+            # The extractor, for 'Download now': from an explicit
+            # 'ERROR: [ie] id:' line, else from yt-dlp's own watch URL.
+            ies = [ie for explicit, _m, ie in entry.errors.get(vid, ())
+                   if explicit and ie]
+            if ies:
+                error['ie'] = clean_text(ies[-1], 40)
+            elif video.get('url') == YOUTUBE_WATCH + vid:
+                error['ie'] = 'youtube'
             errors.append(error)
         for vid, msgs in entry.errors.items():
             if vid in videos:
