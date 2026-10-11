@@ -296,6 +296,18 @@ def test_archived_youtube_video_is_answered_at_once(job_client):
     assert fake.procs[1].argv[-1] == f'https://www.youtube.com/live/{VID}'
 
 
+def test_repeated_already_answers_keep_the_log_limit(job_client):
+    client, fake = job_client()
+    paths = client.app_module.PATHS
+    with open(paths.archive_file, 'w') as f:
+        f.write(f'youtube {VID}\n')
+    for n in range(jobs.MAX_LOGS + 5):
+        assert api(client, f'{WATCH}&t={n}').json()['state'] == 'already'
+    assert not fake.procs
+    logs = os.listdir(os.path.join(paths.status_dir, 'jobs'))
+    assert len(logs) == jobs.MAX_LOGS
+
+
 def test_archive_check_is_skipped_when_args_conf_has_its_own(job_client):
     client, fake = job_client()
     paths = client.app_module.PATHS

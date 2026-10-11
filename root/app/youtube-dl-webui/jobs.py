@@ -630,6 +630,8 @@ class JobManager:
                                 + ENDED)
             finally:
                 await log.close()
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(self._prune_logs)
         return self.ticket(job)
 
     # -- running -------------------------------------------------------------
