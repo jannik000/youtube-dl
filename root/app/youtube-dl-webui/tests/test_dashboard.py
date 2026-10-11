@@ -1194,3 +1194,24 @@ def test_a_single_video_entry_moves_the_overall_bar(env):
     current = env.dash().status()['current']
     assert current['video']['id'] == 'm1' and current['item'] is None
     assert current['overall'] == 25.0
+
+
+def test_attaching_to_a_pass_with_many_events_counts_them_all(env, monkeypatch):
+    """The kept list of the newest run's events is capped; attaching to
+    the pass (web UI restart) or a new log reads them from the file."""
+    monkeypatch.setattr(dashboard, 'MAX_RUN_EVENTS', 3)
+    events, lines = _cut_pass(
+        env, '0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:'
+        + PASS_NONCE, lambda e: e['t'] == 'start' and e['i']['id'] == 'mixed-1')
+    dash = env.dash()
+    expected = {'new': 2, 'skipped': 1, 'failed': 5, 'filtered': 1}
+    assert dash.status()['current']['counts'] == expected
+    # tee truncates and the log comes back (the log is parsed again).
+    env.set_log(['x'])
+    dash.status()
+    cut = next(i for i, line in enumerate(lines) if '0.1% of  832.66KiB at  '
+               'Unknown B/s ETA Unknown @@ytdl:' + PASS_NONCE in line
+               and 'mixed-1' in line)
+    env.set_log(lines[:cut + 1])
+    env.now += 1
+    assert dash.status()['current']['counts'] == expected

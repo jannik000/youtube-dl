@@ -638,6 +638,9 @@ class PassLog:
         self.starts = collections.OrderedDict()   # id -> start event info
         self.behind = False
         self.rotation_ts = None   # last 'cookies rotated' warning seen
+        # run id -> all its start/end events from the file, for a run with
+        # more than MAX_RUN_EVENTS of them (set by Dashboard).
+        self.reload = None
 
     def detach(self):
         self.run = self.nonce = self.parser = None
@@ -670,6 +673,14 @@ class PassLog:
                     self.starts.popitem(last=False)
         self.parser.add_events(events)
 
+    def _all_events(self):
+        if len(self.events) >= MAX_RUN_EVENTS and self.reload is not None:
+            try:
+                return self.reload(self.run)
+            except OSError:
+                pass
+        return self.events
+
     def refresh(self, max_bytes, now):
         if self.parser is None:
             return
@@ -678,7 +689,7 @@ class PassLog:
             # tee started a new log: the lines read so far belong to
             # another pass. The events stay; the log is parsed again.
             self._new_parser()
-            self.parser.add_events(self.events)
+            self.parser.add_events(self._all_events())
         self.behind = result.more
         for line in result.lines:
             self.parser.feed(line)
@@ -1098,6 +1109,7 @@ class Dashboard:
                  proc_dir='/proc', interval=None, clock=time.time):
         self.events = EventLog(status_dir)
         self.pass_log = PassLog(pass_log)
+        self.pass_log.reload = self._run_events_from_file
         self.downloads_dir = downloads_dir
         self.cookies = CookieFile(cookies_file)
         self.proc_dir = proc_dir
@@ -1120,13 +1132,24 @@ class Dashboard:
             return
         budget = REFRESH_BYTES
         if self.pass_log.run != record['id']:
-            self.pass_log.attach(record, self.events.run_events)
+            events = self.events.run_events
+            if len(events) >= MAX_RUN_EVENTS:     # the list is capped
+                try:
+                    events = self._run_events_from_file(record['id'])
+                except OSError:
+                    pass
+            self.pass_log.attach(record, events)
             budget = INITIAL_BYTES
         else:
             self.pass_log.add_events([
                 e for e in new if e.get('t') in ('start', 'end')
                 and e.get('src') == 'scheduled' and e.get('run') == record['id']])
         self.pass_log.refresh(budget, now)
+
+    def _run_events_from_file(self, run):
+        return [e for e in se.read_events(self.events.status_dir, run=run)
+                if e.get('t') in ('start', 'end')
+                and e.get('src') == 'scheduled' and e.get('run') == run]
 
     def log_nonce(self):
         """Nonce of the newest pass (to recognise its markers in the log);
