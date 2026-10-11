@@ -387,6 +387,25 @@ def test_live_pass_progress_counts_and_pending(env):
     assert status['problems'][0]['kind'] == 'bot_check'   # most severe first
 
 
+def test_error_lines_carrying_the_nonce_do_not_reveal_it(env, tmp_path):
+    events, lines = _fixture('pass_default')
+    stop = next(i for i, e in enumerate(events)
+                if e['t'] == 'start' and e['i']['id'] == 'v2')
+    cut = next(i for i, line in enumerate(lines)
+               if 'ERROR: [youtube] v2: No video formats found!' in line)
+    forged = [f'ERROR: [youtube] abcdefghijk: crafted @@ytdl:{PASS_NONCE} t',
+              f'ERROR: crafted3 @@ytdl:{PASS_NONCE} x',
+              f'WARNING: [youtube] v2: w @@ytdl:{PASS_NONCE.upper()}']
+    env.events(events[:stop + 1])
+    env.set_log(lines[:cut + 1] + forged)
+    env.process(PASS_PID)
+    env.now = PASS_TS + 20
+    text = json.dumps(env.dash().status())
+    assert 'crafted @@ytdl:' in text      # the message is shown, masked
+    assert PASS_NONCE not in text.lower()
+    assert se.clean_text(f'a @@ytdl:{PASS_NONCE} b') == 'a @@ytdl:\u2026 b'
+
+
 def test_live_video_with_an_error_counts_as_failed(env):
     # The bot check: v2 started and logged its ERROR, the next item has not
     # started yet. v2 is no longer in progress.

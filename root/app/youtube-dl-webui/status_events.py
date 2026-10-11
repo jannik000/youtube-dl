@@ -165,14 +165,20 @@ _UNSAFE_RE = re.compile(
     '[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e'
     '\u2066-\u2069\ud800-\udfff]')
 
+# The sentinel and whatever hex follows it: a nonce must never be stored or
+# shown, even inside an error message that merely contains it.
+_SENTINEL_TEXT_RE = re.compile(r'@@ytdl:[0-9a-fA-F]*')
+
 
 def clean_text(value, limit=MAX_TEXT):
     """Make a string safe to store and show as text: no ANSI codes, control
-    or bidirectional-override characters, tabs and newlines as spaces, at
-    most ``limit`` characters. Non-strings become ''."""
+    or bidirectional-override characters, tabs and newlines as spaces, any
+    ``@@ytdl:<hex>`` masked, at most ``limit`` characters. Non-strings
+    become ''."""
     if not isinstance(value, str):
         return ''
     value = _ANSI_RE.sub('', value)
+    value = _SENTINEL_TEXT_RE.sub('@@ytdl:\u2026', value)
     value = value.replace('\t', ' ').replace('\n', ' ').replace('\r', ' ')
     value = _UNSAFE_RE.sub('', value).strip()
     if len(value) > limit:
