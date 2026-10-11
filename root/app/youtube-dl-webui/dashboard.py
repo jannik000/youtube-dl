@@ -1200,8 +1200,11 @@ class Dashboard:
             state = 'interrupted'
         elif oneshot:
             state = 'oneshot'
-        else:
+        elif script_alive(self.proc_dir, record['pid'], record['ts']):
             state = 'sleeping'
+        else:
+            # The script died or was stopped after its run_end.
+            state = 'stopped'
         current = (self._current(record, now, running)
                    if running or interrupted else None)
         errors = []

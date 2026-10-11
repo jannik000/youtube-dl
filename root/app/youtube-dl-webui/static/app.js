@@ -529,6 +529,8 @@
       text = isNum(sc.next) ? (sc.next <= nowS() ? 'Starting…' : 'Sleeping · next ' + hm(sc.next)) : 'Sleeping';
     } else if (sc.state === 'interrupted') {
       tone = 'warn'; ic = 'alert'; text = 'Interrupted';
+    } else if (sc.state === 'stopped') {
+      tone = 'warn'; ic = 'alert'; text = 'Downloader stopped';
     } else if (sc.state === 'oneshot') {
       text = 'Finished · one-shot mode';
     } else {
@@ -642,6 +644,10 @@
     if (sc.state === 'interrupted') {
       return { label: 'Scheduler', value: 'Interrupted', dot: 'warn', border: 'warn',
         sub: 'the run from ' + hm(s.current && s.current.started) + ' was stopped' };
+    }
+    if (sc.state === 'stopped') {
+      return { label: 'Scheduler', value: 'Stopped', dot: 'warn', border: 'warn',
+        sub: 'the downloader is not running' };
     }
     if (sc.state === 'oneshot') {
       return { label: 'Scheduler', value: 'Finished', dot: 'idle', sub: 'one-shot mode: runs once' };
@@ -760,7 +766,7 @@
   var STATE_CHIP = {
     running: ['Running', 'run', 'dot'], sleeping: ['Sleeping', 'idle', 'moon'],
     interrupted: ['Interrupted', 'warn', 'alert'], oneshot: ['Finished', 'idle', 'moon'],
-    nodata: ['No data yet', 'idle', 'moon']
+    stopped: ['Stopped', 'warn', 'alert'], nodata: ['No data yet', 'idle', 'moon']
   };
 
   function runNowButtons() {
@@ -829,6 +835,8 @@
       if (sc.state === 'sleeping' && isNum(sc.next)) {
         text = sc.next <= nowS() ? 'Nothing running. The next run is starting…'
           : 'Nothing running. Next scheduled run at ' + hm(sc.next) + ' (in ' + duration(sc.next - nowS()) + ').';
+      } else if (sc.state === 'stopped') {
+        text = 'The downloader is not running (stopped, or restarting). Run now starts a new run.';
       } else if (sc.state === 'oneshot') {
         text = 'Runs once, then the container exits.';
       } else if (sc.state === 'nodata') {

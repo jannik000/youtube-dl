@@ -294,6 +294,14 @@ def test_state_sleeping_and_oneshot(env):
     assert oneshot['next'] is None and oneshot['interval_secs'] is None
 
 
+def test_state_stopped_when_the_script_died_after_run_end(env):
+    env.events([run_start(), run_end(nxt=NOW + 3600)])
+    status = env.dash().status()          # no youtube-dl.sh process
+    assert status['scheduler']['state'] == 'stopped'
+    assert status['scheduler']['next'] is None
+    assert status['current'] is None
+
+
 def test_running_in_oneshot_mode(env):
     env.events([run_start(interval='false')])
     env.process(4242)

@@ -205,7 +205,7 @@ on a phone, a tablet and a desktop, in light and dark mode.
 
 | Card | What it shows |
 | :--- | :--- |
-| Scheduler | Running (since when), sleeping until the next pass, interrupted, or finished (one-shot mode). |
+| Scheduler | Running (since when), sleeping until the next pass, interrupted, stopped (the downloader died or was stopped after a pass), or finished (one-shot mode). |
 | Last run | Start, duration and result of the newest finished pass: new videos, or failures and the exit code. |
 | Last 24 h | Videos downloaded in the last 24 hours, split into scheduled and manual, with a 7-day mini chart. |
 | This run | New, skipped, failed and filtered videos of the running pass (or of the last one while idle). Tagged *from log*, see the limits below. |
