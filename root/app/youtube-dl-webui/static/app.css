@@ -20,6 +20,7 @@
   --ok-bg: #DCFCE7;
   --warn: #B45309;
   --warn-bg: #FEF3C7;
+  --log-warn: #A14A08;   /* 4.5:1 on the log background */
   --err: #B91C1C;
   --err-bg: #FEE2E2;
   --on-err: #FFFFFF;
@@ -54,6 +55,7 @@
     --ok-bg: #12301F;
     --warn: #FBBF24;
     --warn-bg: #3A2A0B;
+    --log-warn: #FBBF24;
     --err: #F87171;
     --err-bg: #3B1414;
     --on-err: #1A0A0A;
@@ -82,6 +84,7 @@
   --ok-bg: #12301F;
   --warn: #FBBF24;
   --warn-bg: #3A2A0B;
+  --log-warn: #FBBF24;
   --err: #F87171;
   --err-bg: #3B1414;
   --on-err: #1A0A0A;
@@ -308,8 +311,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 6px 12px;
+  min-height: 44px;
+  padding: 6px 14px;
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
@@ -426,6 +429,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .banner-text { flex: 999 1 260px; font-weight: 550; min-width: 0; }
 .banner a, .banner button.linkish { color: inherit; font-weight: 650; }
+.banner a { display: inline-flex; align-items: center; min-height: 44px; }
 .linkish {
   background: none;
   border: 0;
@@ -569,6 +573,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
   gap: 10px;
 }
 .job-title { font-weight: 600; color: var(--text); text-decoration: none; min-width: 0; }
+/* A 44 px hit area without changing the line box. */
+.job-box .job-title { padding-block: 12px; margin-block: -12px; }
 .job-title:hover { text-decoration: underline; }
 .info-line { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); }
 .info-line .ic { margin-top: 3px; }
@@ -656,7 +662,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .seg { display: inline-flex; flex-wrap: wrap; padding: 3px; border-radius: var(--radius-s); background: var(--s2); border: 1px solid var(--border); }
 .seg button {
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 10px;
   border: 0;
   border-radius: 7px;
@@ -684,7 +690,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .log-line { white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-line.is-skip { color: var(--muted); }
-.log-line.is-warn { color: var(--warn); }
+.log-line.is-warn { color: var(--log-warn); }
 .log-line.is-err { color: var(--err); }
 .log-line.is-mark { color: var(--accent-text); font-weight: 600; }
 .log-body.hide-skip .log-line.is-skip { display: none; }
