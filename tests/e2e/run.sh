@@ -403,6 +403,110 @@ check "exited with code 0" \
   test "$(docker inspect -f '{{.State.Running}} {{.State.ExitCode}}' "$CE")" = 'false 0'
 
 ########################################################################
+echo "== Scenario F: credentials from files (*_FILE), PUID=1032/PGID=65537"
+echo "image config: $(docker image inspect "$IMAGE" --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}')"
+check "image starts via CMD [\"/entrypoint.sh\"] without ENTRYPOINT" \
+  test "$(docker image inspect "$IMAGE" --format '{{json .Config.Entrypoint}} {{json .Config.Cmd}}')" = 'null ["/entrypoint.sh"]'
+F="$(new_config f)"
+mkdir -p "$F/secrets"
+F_PW='e2e-file-password-not-secret'
+F_TOKEN='e2e-file-token-0123456789'
+# Like secrets on the host: root:root 0644, bind-mounted as single files. The
+# password file ends with a newline, the token file does not.
+docker run --rm -v "$F/secrets:/s" --entrypoint /bin/sh "$IMAGE" -c "
+  printf '%s\n' '$F_PW' > /s/pw && printf '%s' '$F_TOKEN' > /s/token &&
+  : > /s/empty && printf 'x' > /s/private &&
+  chown 0:0 /s/pw /s/token /s/empty /s/private &&
+  chmod 644 /s/pw /s/token /s/empty && chmod 600 /s/private"
+CF=e2e-f
+CONTAINERS+=("$CF")
+docker run -d --name "$CF" -p "127.0.0.1:$((PORT + 3)):8080" \
+  -e PUID=1032 -e PGID=65537 -e youtubedl_webui=true -e youtubedl_interval=1h \
+  -e youtubedl_debug=true \
+  -e WEBUI_USERNAME="$USER_NAME" \
+  -e WEBUI_PASSWORD_FILE=/run/secrets/youtube_dl_webui_password \
+  -e WEBUI_API_TOKEN_FILE=/run/secrets/youtube_dl_webui_api_token \
+  -v "$F/secrets/pw:/run/secrets/youtube_dl_webui_password:ro" \
+  -v "$F/secrets/token:/run/secrets/youtube_dl_webui_api_token:ro" \
+  -v "$F/config:/config" -v "$F/downloads:/downloads" "$IMAGE" >/dev/null
+BASE_F="http://127.0.0.1:$((PORT + 3))"
+check "web UI from files comes up and demands auth (401)" \
+  wait_for 90 sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' $BASE_F/)\" = 401 ]"
+check "secret files are root:root 0644 in the container" \
+  test "$(docker exec "$CF" stat -c '%u:%g %a' /run/secrets/youtube_dl_webui_password)" = '0:0 644'
+check "abc has UID 1032 / GID 65537" \
+  test "$(docker exec "$CF" id -u abc):$(docker exec "$CF" id -g abc)" = '1032:65537'
+check "sources logged by name (init check and web UI)" \
+  sh -c "docker logs $CF 2>&1 | grep -q '\[web-ui\] WEBUI_PASSWORD set from WEBUI_PASSWORD_FILE' &&
+    docker exec $CF grep -q 'WEBUI_API_TOKEN set from WEBUI_API_TOKEN_FILE' /var/log/youtube-dl-webui/youtube-dl-webui.log"
+check "Basic auth with the file's password (trailing newline stripped) (200)" \
+  test "$(http_code -u "$USER_NAME:$F_PW" "$BASE_F/")" = 200
+check "wrong password rejected (401)" \
+  test "$(http_code -u "$USER_NAME:wrong" "$BASE_F/")" = 401
+check "Bearer token from file accepted by POST /api/download" \
+  sh -c "curl -s -H 'Authorization: Bearer $F_TOKEN' --data-urlencode 'url=https://example.invalid/secret-file' $BASE_F/api/download | grep -q '\"id\"'"
+check "wrong Bearer token rejected (401)" \
+  test "$(http_code -H 'Authorization: Bearer wrong' --data-urlencode 'url=https://example.invalid/x' "$BASE_F/api/download")" = 401
+inspect_hides_values() {
+  local s
+  s="$(docker inspect "$1")" || return 1
+  grep -q 'WEBUI_PASSWORD_FILE=/run/secrets/youtube_dl_webui_password' <<<"$s" &&
+    ! grep -qF "$F_PW" <<<"$s" && ! grep -qF "$F_TOKEN" <<<"$s"
+}
+check "docker inspect shows the paths, never the values" inspect_hides_values "$CF"
+logs_hide_values() {  # positive signal first: the web UI started and logged
+  local logs
+  logs="$(docker logs "$1" 2>&1; docker exec "$1" cat /var/log/youtube-dl-webui/youtube-dl-webui.log)" || return 1
+  grep -q 'webserver is enabled' <<<"$logs" && ! grep -qF "$F_PW" <<<"$logs" &&
+    ! grep -qF "$F_TOKEN" <<<"$logs"
+}
+check "values never logged (youtubedl_debug=true)" logs_hide_values "$CF"
+webui_env_has_path_only() {
+  local e
+  e="$(docker exec -u abc "$1" sh -c 'tr "\0" "\n" < /proc/$(supervisorctl -c /etc/supervisor/supervisord.conf pid youtube-dl-webui)/environ')" || return 1
+  grep -q '^WEBUI_PASSWORD_FILE=/run/secrets/' <<<"$e" && ! grep -q '^WEBUI_PASSWORD=' <<<"$e" &&
+    ! grep -qF "$F_PW" <<<"$e"
+}
+check "web UI process gets the path, not the value, in its environment" \
+  webui_env_has_path_only "$CF"
+
+########################################################################
+echo "== Scenario G: unusable credential files keep the web UI off (fail closed)"
+G_PORT=$((PORT + 4))
+refused_case() {  # refused_case name port docker-args... -> starts a container
+  local name="e2e-g-$1" port="$2"; shift 2
+  local dir; dir="$(new_config "g-$name")"
+  CONTAINERS+=("$name")
+  docker run -d --name "$name" -p "127.0.0.1:$port:8080" \
+    -e PUID=1032 -e PGID=65537 -e youtubedl_webui=true -e youtubedl_interval=1h \
+    -e WEBUI_USERNAME="$USER_NAME" "$@" \
+    -v "$dir/config:/config" -v "$dir/downloads:/downloads" "$IMAGE" >/dev/null
+}
+refused_case both "$G_PORT" -e WEBUI_PASSWORD=plain \
+  -e WEBUI_PASSWORD_FILE=/run/secrets/pw -v "$F/secrets/pw:/run/secrets/pw:ro"
+refused_case missing "$((G_PORT + 1))" -e WEBUI_PASSWORD_FILE=/run/secrets/does-not-exist
+refused_case empty "$((G_PORT + 2))" \
+  -e WEBUI_PASSWORD_FILE=/run/secrets/pw -v "$F/secrets/empty:/run/secrets/pw:ro"
+refused_case private "$((G_PORT + 3))" \
+  -e WEBUI_PASSWORD_FILE=/run/secrets/pw -v "$F/secrets/private:/run/secrets/pw:ro"
+refused_ok() {  # refused_ok name port message -> refusal logged, UI off, downloader on
+  wait_for 60 log_has "$1" 'Refusing to start the web UI' &&
+    log_has "$1" -F "$3" && ! log_has "$1" -F "$F_PW" &&
+    sleep 3 &&
+    [ "$(docker inspect -f '{{.State.Running}}' "$1")" = true ] &&
+    [ "$(http_code "http://127.0.0.1:$2/")" = 000 ] &&
+    grep -q RUNNING <<<"$(docker exec "$1" supervisorctl -c /etc/supervisor/supervisord.conf status youtube-dl)"
+}
+check "X and X_FILE both set: refused with a message" \
+  refused_ok e2e-g-both "$G_PORT" 'WEBUI_PASSWORD and WEBUI_PASSWORD_FILE are both set'
+check "missing file: refused with a message" \
+  refused_ok e2e-g-missing "$((G_PORT + 1))" 'which does not exist'
+check "empty file: refused with a message" \
+  refused_ok e2e-g-empty "$((G_PORT + 2))" 'which is empty'
+check "file not readable by PUID 1032 (root 0600): refused with a message" \
+  refused_ok e2e-g-private "$((G_PORT + 3))" 'not readable by the web UI user (uid 1032'
+
+########################################################################
 echo
 if [ "$FAILURES" -gt 0 ]; then
   echo "E2E: $FAILURES check(s) failed"
