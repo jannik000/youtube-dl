@@ -875,6 +875,13 @@ class JobManager:
         elif rc in OK_CODES:
             state = ('already' if not result['new'] and not result['failed']
                      and result['skipped'] else 'done')
+            if (state == 'done' and not result['new'] and not result['failed']
+                    and result.get('filtered')):
+                # e.g. a live stream or premiere under args.conf's default
+                # --match-filter '!is_live': nothing was downloaded.
+                state = 'failed'
+                failure = ('Nothing downloaded: skipped by --match-filter in '
+                           'args.conf (a live stream or premiere?).')
         else:
             state = 'partial' if result['new'] else 'failed'
         title = ''

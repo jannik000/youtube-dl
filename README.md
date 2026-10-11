@@ -283,6 +283,8 @@ into a queue:
   `cookies.txt` (deleted when it ends), because yt-dlp rewrites its cookie
   file on exit and parallel runs would wipe each other's cookies; only the
   scheduled pass updates `/config/cookies.txt`.
+* A download where `args.conf`'s `--match-filter` (by default `'!is_live'`)
+  skipped everything ends as *failed* with that reason, not as finished.
 * **Re-download anyway** (checkbox in the form, *Re-download* on a finished
   download) runs yt-dlp without any archive (`--no-download-archive`), so
   the video is fetched again and not recorded in the archive.

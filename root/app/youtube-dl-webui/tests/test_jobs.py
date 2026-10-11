@@ -436,6 +436,9 @@ def _video_events(client, proc, items):
     (2, [], b'', 'failed', 'other'),
     (0, [], f'[download] {VID}: has already been recorded in the archive\n'
      .encode(), 'already', None),
+    # args.conf's default --match-filter '!is_live' skipped the only video.
+    (0, [], b'[download] Live Now does not pass filter (!is_live), '
+     b'skipping ..\n', 'failed', 'other'),
 ])
 def test_job_outcome(job_client, rc, items, output, state, error):
     client, fake = job_client()
