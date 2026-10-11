@@ -6,7 +6,8 @@ behind and builds the JSON of ``GET /api/status``:
 * ``EventLog`` follows ``/config/.youtube-dl-status/events.jsonl`` (plus the
   rotated ``events.jsonl.1`` once at startup) and keeps the last runs, the
   last finished or failed items, the download times of the last 7 days, the
-  manual jobs and per-channel statistics from the ``run_end`` rows.
+  manual jobs and per-channel statistics from the ``run_end`` rows (for a
+  pass too large for one event, from the ``run_rows`` events before it).
 * ``PassLog`` tails the pass log ``/var/log/youtube-dl/youtube-dl.log``
   (which ``tee`` truncates at the start of every pass) with the shared
   ``status_events.LogParser`` while the newest pass has no ``run_end`` yet,
@@ -438,6 +439,7 @@ class EventLog:
     def _apply(self, event):
         handler = {
             'run_start': self._run_start, 'run_end': self._run_end,
+            'run_rows': self._run_rows,
             'start': self._video, 'end': self._video,
             'job_queued': self._job, 'job_start': self._job,
             'job_end': self._job,
@@ -478,20 +480,33 @@ class EventLog:
             self.runs.move_to_end(run, last=False)
             while len(self.runs) > MAX_RUNS:
                 self.runs.popitem(last=False)
-        rows = event.get('ch') if isinstance(event.get('ch'), list) else []
+        if isinstance(event.get('ch'), list):
+            rows = [r for r in map(_row, event['ch'][:MAX_ROWS]) if r]
+        else:   # a large pass: the rows came before, in run_rows events
+            rows = record.get('rows') or []
         errors = event.get('err') if isinstance(event.get('err'), list) else []
         record.update({
             'ended': True, 'end_ts': _ts(event.get('ts')),
             'rc': _int(event.get('rc')), 'next': _ts(event.get('next')),
             'partial': event.get('partial') is True,
             'sum': _sum(event.get('sum')),
-            'rows': [r for r in map(_row, rows[:MAX_ROWS]) if r],
+            'rows': rows,
             'err': [e for e in map(_error, errors[:se.MAX_ERRORS]) if e]})
         names = self.run_names if run == self.newest else {}
         self._update_channels(record, names)
         if run == self.newest:
             self.run_events = []
             self.run_names = {}
+
+    def _run_rows(self, event):
+        """Channel rows of a large pass, written right before its run_end
+        (see status_events.split_run_end)."""
+        record = self.runs.get(_hex(event.get('run')))
+        rows = event.get('ch')
+        if record is None or record['ended'] or not isinstance(rows, list):
+            return
+        room = MAX_ROWS - len(record['rows'])
+        record['rows'].extend(r for r in map(_row, rows[:max(0, room)]) if r)
 
     def _update_channels(self, record, names):
         for row in record['rows']:

@@ -933,6 +933,34 @@ def fit_run_end(event):
     return event
 
 
+def split_run_end(event):
+    """The events that record a pass's end: run_end alone if its channel
+    rows fit, else 'run_rows' events carrying the rows (each one under
+    MAX_EVENT_BYTES) followed by a run_end without 'ch'. The size of
+    run_end then no longer depends on the number of entries."""
+    if len(encode_event(dict(event, err=[]))) <= MAX_EVENT_BYTES:
+        return [fit_run_end(event)]
+    rows = event.pop('ch')
+    head = {'t': 'run_rows', 'ts': event['ts'], 'run': event['run'], 'ch': []}
+    base = len(encode_event(head))
+    chunks, chunk, size = [], [], base
+    for row in rows:
+        row_size = len(json.dumps(row, separators=(',', ':'),
+                                  allow_nan=False)) + 1
+        if base + row_size > MAX_EVENT_BYTES:
+            row = row[:-1] + [None]          # never happens with MAX_URL
+            row_size = len(json.dumps(row, separators=(',', ':'))) + 1
+        if chunk and size + row_size > MAX_EVENT_BYTES:
+            chunks.append(chunk)
+            chunk, size = [], base
+        chunk.append(row)
+        size += row_size
+    if chunk:
+        chunks.append(chunk)
+    event['rows'] = len(rows)
+    return [dict(head, ch=c) for c in chunks] + [fit_run_end(event)]
+
+
 def _cmd_begin(args):
     rotate(args.status_dir)
     run, nonce = new_id(), new_id()
@@ -989,7 +1017,8 @@ def _cmd_end(args):
         'partial': not found, 'sum': summary['sum'], 'ch': summary['ch'],
         'err': summary['err'],
     }
-    append_event(fit_run_end(event), args.status_dir)
+    for record in split_run_end(event):
+        append_event(record, args.status_dir)
     return 0
 
 

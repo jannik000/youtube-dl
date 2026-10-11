@@ -1107,3 +1107,45 @@ def test_status_dir_files_stay_private(make_client):
     os.chmod(module.PATHS.events_file, 0o600)
     client.get('/api/status', auth=basic())
     assert stat.S_IMODE(os.stat(module.PATHS.events_file).st_mode) == 0o600
+
+
+def test_a_pass_with_1000_entries_still_ends(env):
+    """run_end must never fail because of its size: the channel rows of a
+    large pass go into run_rows events before it."""
+    run, nonce, n = 'c' * 16, 'd' * 16, 1000
+    env.events([run_start(run=run, nonce=nonce, pid=PASS_PID, channels=n,
+                          ts=NOW - 600)])
+    lines = []
+    for i in range(1, n + 1):
+        url = f'https://www.youtube.com/channel/UC{i:022d}/videos'
+        lines.append(f'@@ytdl:{nonce} channel ' + json.dumps(
+            {'phase': 'start', 'index': i, 'total': n, 'url': url,
+             'ts': NOW - 500}))
+        lines.append(f'ERROR: [youtube] UC{i:022d}: Video unavailable')
+        lines.append(f'@@ytdl:{nonce} channel ' + json.dumps(
+            {'phase': 'end', 'index': i, 'rc': 1, 'secs': 1, 'ts': NOW - 400}))
+    lines.append(f'@@ytdl:{nonce} pass_end')
+    env.set_log(lines)
+    assert se.main(['end', f'--status-dir={env.status_dir}', f'--run={run}',
+                    f'--nonce={nonce}', '--rc=1', '--interval=3h',
+                    f'--log={env.log}', '--wait=0']) == 0
+    with open(env.events_file, 'rb') as f:
+        written = [json.loads(line) for line in f.read().splitlines()[1:]]
+    assert {e['t'] for e in written[:-1]} == {'run_rows'}
+    assert len(written) > 2
+    assert written[-1]['t'] == 'run_end' and 'ch' not in written[-1]
+    assert written[-1]['rows'] == n and written[-1]['err']
+    assert all(len(se.encode_event(e)) <= se.MAX_EVENT_BYTES for e in written)
+    assert [r[0] for e in written[:-1] for r in e['ch']] == list(range(1, n + 1))
+    env.process(PASS_PID)
+    env.now = NOW
+    status = env.dash().status()
+    assert status['scheduler']['state'] == 'sleeping'
+    assert status['last_run']['result'] == 'failed'
+    assert len(status['channels']) == n
+
+
+def test_split_run_end_keeps_small_passes_in_one_event():
+    event = run_end(rows=[[1, 0, 0, 0, 0, 0, 1, NOW, 'https://a/']])
+    del event['v']
+    assert se.split_run_end(dict(event)) == [event]
