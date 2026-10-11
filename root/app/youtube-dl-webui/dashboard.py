@@ -1107,6 +1107,7 @@ class Dashboard:
         self.boot = secrets.token_hex(4)
         self.rev = 0
         self._digest = None
+        self._overall = (None, 0.0)   # (run, highest overall shown so far)
 
     # -- refresh ---------------------------------------------------------
 
@@ -1293,22 +1294,34 @@ class Dashboard:
                     done_idx = max(done_idx, index)
         channel = video = item_pos = None
         inner = 0.0
+        # Between two channels: keep showing the last one until the next
+        # channel-start marker.
+        shown = entry
+        if shown is None and parser is not None and done_idx:
+            shown = parser.entries.get(done_idx)
+        if shown is not None:
+            name = (self.events.run_names.get(shown.index)
+                    or clean(shown.playlist, 120))
+            channel = {'index': shown.index, 'total': total,
+                       'url': clean_url(shown.url), 'name': name}
         if entry is not None:
-            name = (self.events.run_names.get(entry.index)
-                    or clean(entry.playlist, 120))
-            channel = {'index': entry.index, 'total': total,
-                       'url': clean_url(entry.url), 'name': name}
             video, item_pos, inner = self._video(entry)
-            if not name and video and video.get('playlist'):
+            if not channel['name'] and video and video.get('playlist'):
                 channel['name'] = video['playlist']
-        if entry is not None:
             position = entry.index - 1 + inner
             channels_left = (total - entry.index) if total else None
         else:
             position = done_idx
             channels_left = (total - done_idx) if total else None
-        overall = (round(100 * min(1.0, position / total), 1)
-                   if total else None)
+        overall = None
+        if total:
+            # Never backwards within a run: between items or videos the
+            # inner fraction falls back for a moment.
+            overall = round(100 * min(1.0, position / total), 1)
+            run, highest = self._overall
+            if run == record['id']:
+                overall = max(overall, highest)
+            self._overall = (record['id'], overall)
         in_channel = None
         if item_pos and item_pos['count']:
             in_channel = max(0, item_pos['count'] - item_pos['index'])
@@ -1363,7 +1376,8 @@ class Dashboard:
         if not (auto and count) and entry.item:
             auto, count, source = entry.item, entry.n_items, 'log'
         if not (auto and count):
-            return video, None, 0.0
+            # A single video (no playlist position): its own progress.
+            return video, None, min(1.0, frac)
         auto = min(auto, count)
         inner = min(1.0, (auto - 1 + frac) / count)
         return video, {'index': auto, 'count': count, 'source': source}, inner

@@ -447,7 +447,8 @@ def test_live_pass_follows_new_lines_and_events(env):
     env.events(events[1:])
     env.set_log(lines)
     status = dash.status()
-    assert status['current']['channel'] is None      # all entries ended
+    # All entries ended: the last channel stays until run_end.
+    assert status['current']['channel']['index'] == 5
     assert status['current']['overall'] == 100.0
     assert status['current']['counts'] == {'new': 5, 'skipped': 4,
                                            'failed': 6, 'filtered': 1}
@@ -1149,3 +1150,39 @@ def test_split_run_end_keeps_small_passes_in_one_event():
     event = run_end(rows=[[1, 0, 0, 0, 0, 0, 1, NOW, 'https://a/']])
     del event['v']
     assert se.split_run_end(dict(event)) == [event]
+
+
+def test_overall_never_moves_backwards_within_a_run(env, monkeypatch):
+    _cut_pass(env, '0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:'
+              + PASS_NONCE + ' {"progress.status": "downloading", '
+              '"progress.downloaded_bytes": 1024, "progress.total_bytes": '
+              '852639, "info.id": "mixed-1"',
+              lambda e: e['t'] == 'start' and e['i']['id'] == 'mixed-1')
+    dash = env.dash()
+    first = dash.status()['current']['overall']
+    assert first > 20
+    # Between two items the inner fraction falls back for a moment.
+    monkeypatch.setattr(dash, '_video', lambda entry: (None, None, 0.0))
+    env.now += 1
+    assert dash.status()['current']['overall'] == first
+
+
+def test_a_single_video_entry_moves_the_overall_bar(env):
+    run, nonce = 'e' * 16, 'f' * 16
+    env.events([run_start(run=run, nonce=nonce, pid=PASS_PID, channels=2,
+                          ts=PASS_TS),
+                {'v': 1, 't': 'start', 'src': 'scheduled', 'run': run,
+                 'ch': 1, 'i': {'id': 'm1', 'title': 'One'}}])
+    env.set_log([
+        f'@@ytdl:{nonce} channel ' + json.dumps(
+            {'phase': 'start', 'index': 1, 'total': 2, 'url': 'fake:m1',
+             'ts': PASS_TS}),
+        f'''[info] Writing '{{"v":1,"t":"start","src":"scheduled","run":"{run}","ch":1,"i":x}}' to: e''',
+        f'[download]  50.0% of 1.00KiB @@ytdl:{nonce} ' + json.dumps(
+            {'progress.status': 'downloading', 'progress.downloaded_bytes': 500,
+             'progress.total_bytes': 1000, 'info.id': 'm1'})])
+    env.process(PASS_PID)
+    env.now = PASS_TS + 20
+    current = env.dash().status()['current']
+    assert current['video']['id'] == 'm1' and current['item'] is None
+    assert current['overall'] == 25.0
