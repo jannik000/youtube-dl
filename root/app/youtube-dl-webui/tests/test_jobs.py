@@ -167,7 +167,7 @@ def test_a_duplicate_returns_the_active_job(job_client):
 
 @pytest.mark.parametrize('value,expected', [
     ('', 1), ('1', 1), ('2', 2), ('3', 3), ('9', 3), ('0', 1), ('x', 1),
-    ('-2', 1)])
+    ('-2', 1), ('\u00b2', 1), ('\u0662', 1)])
 def test_parallel_downloads_are_clamped(job_client, value, expected):
     client, fake = job_client(WEBUI_MAX_PARALLEL_DOWNLOADS=value)
     for n in range(4):

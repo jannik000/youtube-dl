@@ -23,7 +23,7 @@ def _env(name):
 
 def _parallel(value):
     value = value.strip()
-    if not value.isdigit():
+    if not (value.isascii() and value.isdigit()):   # '\u00b2'.isdigit()
         return 1
     return max(1, min(3, int(value)))
 
