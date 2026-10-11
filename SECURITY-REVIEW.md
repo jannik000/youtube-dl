@@ -522,6 +522,11 @@ markiert. Wiederholen prüft die URL erneut (eine inzwischen geänderte Allowlis
 Manuelle Downloads nutzen jetzt `cookies.txt` und das Archiv (Entscheidung des Betreibers). Ein
 archiviertes YouTube-Video wird ohne yt-dlp-Start beantwortet; *Re-download* setzt
 `--no-download-archive`, damit auch ein in `args.conf` gesetztes Archiv nicht greift.
+yt-dlp schreibt seine Cookie-Datei beim Beenden neu (kürzen, dann schreiben, ohne Umbenennen).
+Laufen Jobs neben dem Durchlauf oder nebeneinander, läse einer die halb geschriebene Datei und
+speicherte den gekürzten Stand zurück; die Anmeldung ginge verloren. Jeder Job bekommt deshalb
+eine private Kopie (`jobs/<id>.cookies`, 0600, `O_EXCL`/`O_NOFOLLOW`), die am Ende gelöscht wird
+(Reste nach einem Absturz beim nächsten Start); `/config/cookies.txt` schreibt nur der Durchlauf.
 
 **Restrisiko:** Wird uvicorn per SIGKILL beendet, bevor sein Shutdown fertig ist, läuft ein gerade
 laufendes yt-dlp (eigene Session) weiter, bis es fertig ist; der Job erscheint nach dem Neustart als

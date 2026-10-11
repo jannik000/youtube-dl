@@ -222,11 +222,28 @@ def test_job_argv(job_client):
 def test_job_argv_with_cookies_and_force(job_client):
     client, fake = job_client()
     paths = client.app_module.PATHS
+    jar = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tx\n'
     with open(paths.cookies_file, 'w') as f:
-        f.write('# Netscape HTTP Cookie File\n')
+        f.write(jar)
     argv = _argv(client, fake, force='1').argv
     i = argv.index('--cookies')
-    assert argv[i + 1] == paths.cookies_file and i < argv.index('--newline')
+    # A private copy: yt-dlp rewrites its cookie file on exit (truncate,
+    # then write), so jobs must never get the shared cookies.txt itself.
+    copy = argv[i + 1]
+    assert paths.cookies_file not in argv
+    assert copy == os.path.join(paths.status_dir, 'jobs',
+                                f'{uuid.UUID(fake.procs[0].run)}.cookies')
+    assert i < argv.index('--newline')
+    assert stat.S_IMODE(os.stat(copy).st_mode) == 0o600
+    with open(copy) as f:
+        assert f.read() == jar
+    with open(copy, 'w') as f:      # what yt-dlp's save does to it
+        f.write('')
+    finish(client, fake.procs[0])
+    wait_until(lambda: idle(client))
+    assert not os.path.exists(copy)
+    with open(paths.cookies_file) as f:
+        assert f.read() == jar
     # Forced: no archive at all, not even one args.conf chooses.
     assert '--no-download-archive' in argv
     assert '--download-archive' not in argv
@@ -645,3 +662,15 @@ def test_job_routes_need_basic_auth_and_csrf(job_client, route):
     # Nothing happened.
     assert len(fake.procs) == 1 and fake.procs[0].signals == []
     assert client.jobs.running
+
+
+def test_stale_cookie_copies_are_removed_on_start(make_client, webui_env):
+    jobs_dir = os.path.join(webui_env['config_dir'], '.youtube-dl-status',
+                            'jobs')
+    os.makedirs(jobs_dir, 0o700)
+    os.chmod(os.path.dirname(jobs_dir), 0o700)
+    stale = os.path.join(jobs_dir, f'{uuid.uuid4()}.cookies')
+    with open(stale, 'w') as f:
+        f.write('secret\n')
+    make_client()
+    assert not os.path.exists(stale)

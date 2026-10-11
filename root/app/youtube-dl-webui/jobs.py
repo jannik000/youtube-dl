@@ -67,6 +67,7 @@ MAX_LOGS = 50                  # job logs kept
 MAX_KNOWN = 200                # finished jobs remembered for retry
 REQUEUE_AGE = 86400            # queued jobs older than this are not resumed
 ARCHIVE_MAX_BYTES = 64 * 1024 * 1024
+COOKIES_MAX_BYTES = 16 * 1024 * 1024
 JOBS_DIR = 'jobs'
 OK_CODES = (0, 101)            # 101: yt-dlp stopped early on purpose
 ENDED = '[youtube-dl] Download process ended\n'
@@ -76,6 +77,9 @@ UUID_RE = re.compile(
 _HEX_RE = re.compile(r'[0-9a-f]{32}\Z')
 _LOG_NAME_RE = re.compile(
     r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log\Z')
+_COOKIES_NAME_RE = re.compile(
+    r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
+    r'\.cookies\Z')
 YOUTUBE_ID_RE = re.compile(r'[A-Za-z0-9_-]{11}\Z')
 _YOUTUBE_HOSTS = frozenset({'youtube.com', 'www.youtube.com', 'm.youtube.com',
                             'music.youtube.com'})
@@ -413,6 +417,7 @@ class Job:
         self.eof = False          # the output was read to its end
         self.newline = True       # the log ends with a newline
         self.events_ok = False
+        self.cookies = None       # the job's private copy of cookies.txt
         self.cancelling = False
         self.end_state = None     # 'cancelled' or 'interrupted' once decided
 
@@ -650,8 +655,8 @@ class JobManager:
         argv = [self.binary, '--no-playlist-reverse', '--playlist-end', '-1',
                 '--config-location', self.args_file,
                 *format_args(args_conf, self.format_default)]
-        if os.path.isfile(self.cookies_file):
-            argv += ['--cookies', self.cookies_file]
+        if job.cookies:
+            argv += ['--cookies', job.cookies]
         if job.force:
             # Also switches off an archive args.conf chooses.
             argv.append('--no-download-archive')
@@ -682,11 +687,65 @@ class JobManager:
                     self.legacy_log_dir, f'download_{job.id}.log'))
         return JobLog(await asyncio.to_thread(open_fd))
 
+    def _copy_cookies(self, job):
+        """A private copy of cookies.txt for the job (0600 in the jobs
+        directory), or None without cookies.txt. yt-dlp saves its cookie
+        jar on exit by truncating and rewriting the file; jobs running next
+        to each other and to the pass would otherwise read each other's
+        half-written file and save the short jar back, so manual jobs never
+        write the shared file (their cookie updates are not kept)."""
+        try:
+            src = os.open(self.cookies_file, os.O_RDONLY | os.O_NONBLOCK
+                          | os.O_CLOEXEC)
+        except FileNotFoundError:
+            return None
+        try:
+            st = os.fstat(src)
+            if not stat.S_ISREG(st.st_mode):
+                return None
+            if st.st_size > COOKIES_MAX_BYTES:
+                raise OSError(f'{self.cookies_file} is too large')
+            data = bytearray()
+            while len(data) <= COOKIES_MAX_BYTES:
+                chunk = os.read(src, 1024 * 1024)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            os.close(src)
+        status_fd = se.open_status_dir(self.status_dir)
+        try:
+            jobs_fd = _open_dir(JOBS_DIR, status_fd)
+        finally:
+            os.close(status_fd)
+        name = job.id + '.cookies'
+        try:
+            fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=jobs_fd)
+            try:
+                _write_all(fd, bytes(data))
+            finally:
+                os.close(fd)
+        finally:
+            os.close(jobs_fd)
+        return os.path.join(self.jobs_dir, name)
+
+    def _remove_cookies(self, job):
+        path, job.cookies = job.cookies, None
+        if path:
+            with contextlib.suppress(OSError):
+                os.unlink(path)
+
     async def _start(self, job):
         try:
             job.nonce = se.new_id()
             job.events_ok = await self._event(
                 {'t': 'job_start', 'ts': job.started, 'run': job.hex})
+            try:
+                job.cookies = await asyncio.to_thread(self._copy_cookies, job)
+            except OSError as err:
+                _log.warning('[jobs] cannot copy %s for job %s (%s); running '
+                             'without cookies', self.cookies_file, job.id, err)
             argv = await asyncio.to_thread(self.argv, job, job.events_ok)
             job.parser = se.LogParser(job.nonce, run=job.hex, unmarked=True)
             job.log = await self.open_log(job)
@@ -849,6 +908,8 @@ class JobManager:
             state, title, error = 'failed', '', {'kind': 'other',
                                                  'msg': _clean(str(err))}
         job.rc = job.proc.returncode if job.proc is not None else None
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(self._remove_cookies, job)
         job.state, job.title, job.error = state, title, error
         job.ended = self._now()
         if job.log is not None:
@@ -886,6 +947,12 @@ class JobManager:
                 logs = []
                 with os.scandir(jobs_fd) as entries:
                     for entry in entries:
+                        # Cookie copies left by a job that was killed.
+                        match = _COOKIES_NAME_RE.match(entry.name)
+                        if match and match.group(1) not in self.running:
+                            with contextlib.suppress(OSError):
+                                os.unlink(entry.name, dir_fd=jobs_fd)
+                            continue
                         match = _LOG_NAME_RE.match(entry.name)
                         if not match or not entry.is_file(
                                 follow_symlinks=False):
@@ -954,6 +1021,8 @@ class JobManager:
         again (validated again, if not older than REQUEUE_AGE), and mark
         jobs that were running as interrupted."""
         records = await asyncio.to_thread(scan_jobs, self.status_dir)
+        with contextlib.suppress(Exception):   # also stale cookie copies
+            await asyncio.to_thread(self._prune_logs)
         now = self._now()
         for run, record in records.items():
             job_id = str(uuid.UUID(run))
