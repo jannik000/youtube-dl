@@ -139,15 +139,18 @@ These only apply when `youtubedl_webui=true`.
 | :---: | :---: | :--- |
 | `WEBUI_USERNAME` | (none) | Username for the browser login (HTTP Basic). Required together with `WEBUI_PASSWORD` to use the browser UI.
 | `WEBUI_PASSWORD` | (none) | Password for the browser login. Use a long, unique value.
+| `WEBUI_PASSWORD_FILE` | (none) | Path of a file holding the password, e.g. `/run/secrets/youtube_dl_webui_password` (see [Credentials from files](#credentials-from-files-secrets)). Use instead of `WEBUI_PASSWORD`, never together with it.
 | `WEBUI_API_TOKEN` | (none) | Bearer token for `POST /api/download` and `POST /download` (e.g. the iOS shortcut); with the token both answer JSON `{"id", "state", "position", "message"}` (see [iOS Shortcut](#ios-shortcut)). A long random string. Does **not** grant access to the dashboard, config editing or logs.
+| `WEBUI_API_TOKEN_FILE` | (none) | Path of a file holding the API token, e.g. `/run/secrets/youtube_dl_webui_api_token`. Use instead of `WEBUI_API_TOKEN`, never together with it. (`WEBUI_USERNAME_FILE` works the same way for the username.)
 | `WEBUI_MAX_PARALLEL_DOWNLOADS` | `2` (`1`) | How many [manual downloads](#manual-downloads) run at the same time, 1 to 3 (larger numbers count as 3, anything else as 1). Further ones wait in a queue of at most 20. One manual download may already run next to the scheduled pass; more parallel downloads mean more requests to YouTube.
 | `WEBUI_READONLY` | `true` (`false`) | If `true`, the web UI cannot edit `args.conf`, `channels.txt` or `archive.txt`; they are shown read-only.
 | `WEBUI_ALLOWED_DOMAINS` | (none) | Comma-separated allowlist of domains accepted by the download endpoints, e.g. `youtube.com,youtu.be`. Subdomains are included. Unset means any `http(s)` host.
 | `WEBUI_ALLOW_UNSAFE_ARGS` | `true` (`false`) | If `true`, disables validation of saved `args.conf`/`channels.txt`. Only enable if you understand that options such as `--exec` then allow arbitrary command execution.
 
 The web UI must have either `WEBUI_USERNAME`+`WEBUI_PASSWORD`, or
-`WEBUI_API_TOKEN`, or both. If it is enabled without any credentials it
-refuses to start (fail closed) and logs the reason.
+`WEBUI_API_TOKEN`, or both (each also as a `*_FILE` variant). If it is enabled
+without any credentials, or a credential file cannot be used, it refuses to
+start (fail closed) and logs the reason.
 
 # Image Tags
 All images are published to `ghcr.io/jannik000/youtube-dl`.
@@ -326,6 +329,48 @@ volumes:
 ```
 Do not commit real passwords or tokens. Keep them in a local `.env` file or
 your Synology's environment settings, not in a file you push to GitHub.
+
+## Credentials from files (secrets)
+Environment variables show up in `docker inspect` (`.Config.Env`). To keep the
+password and the API token out of it, point `WEBUI_PASSWORD_FILE` and
+`WEBUI_API_TOKEN_FILE` (and optionally `WEBUI_USERNAME_FILE`) at files instead;
+the container's environment then only holds the paths.
+
+```yaml
+services:
+  youtube-dl:
+    image: ghcr.io/jannik000/youtube-dl:latest
+    environment:
+      PUID: "1026"
+      PGID: "100"
+      youtubedl_webui: "true"
+      WEBUI_USERNAME: "CHANGE_ME"
+      WEBUI_PASSWORD_FILE: /run/secrets/youtube_dl_webui_password
+      WEBUI_API_TOKEN_FILE: /run/secrets/youtube_dl_webui_api_token
+    secrets:
+      - youtube_dl_webui_password
+      - youtube_dl_webui_api_token
+    # volumes, ports, restart as above
+
+secrets:
+  youtube_dl_webui_password:
+    file: ./secrets/webui_password.txt
+  youtube_dl_webui_api_token:
+    file: ./secrets/webui_api_token.txt
+```
+Without compose secrets, a read-only bind mount of a single file works the
+same way: `-v /path/on/host/webui_password.txt:/run/secrets/youtube_dl_webui_password:ro`.
+
+* The web UI reads the files as the unprivileged user (`PUID`/`PGID`), so they
+  must be readable by it: `root:root` with mode `644` works, `600` owned by
+  root does not (the web UI then refuses to start and says so). Docker compose
+  (without Swarm) mounts `file:` secrets as they are on the host.
+* Trailing newlines and whitespace at the end of the file are removed.
+* Setting both `WEBUI_PASSWORD` and `WEBUI_PASSWORD_FILE` (likewise for the
+  token and the username), a missing, unreadable or empty file, or a file over
+  64 KiB stops the web UI from starting; the downloader keeps running.
+* The log only says which value came from a file
+  (`[web-ui] WEBUI_PASSWORD set from WEBUI_PASSWORD_FILE`), never the value.
 
 # iOS Shortcut
 `POST /api/download` returns JSON with no redirect, which suits the iOS
