@@ -779,7 +779,10 @@ def video_progress(progress, start=None, phase=''):
         whole = (None if frac is None
                  else _fraction((sum(w[:k]) + w[k] * frac) / sum(w)))
     processing = phase.startswith(('processing: ', 'processed: '))
-    if processing:
+    if processing and p:
+        # After the download. A postprocessor before any download progress
+        # runs before the download (--convert-subs, SponsorBlock, ...): the
+        # video is not done yet, and overall progress never moves back.
         fraction = 1.0
     else:
         fraction = floor if whole is None else whole

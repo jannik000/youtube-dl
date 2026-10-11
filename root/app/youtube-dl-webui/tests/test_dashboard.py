@@ -764,6 +764,10 @@ def test_video_progress_variants():
     assert processing['phase'] == 'processing'
     assert processing['postprocessor'] == 'EmbedThumbnail'
     assert processing['percent'] is None and processing['fraction'] == 1.0
+    # A postprocessor that runs before the download (--convert-subs,
+    # SponsorBlock) does not complete the video.
+    before = dashboard.video_progress(None, None, 'processing: SponsorBlock')
+    assert before['phase'] == 'processing' and before['fraction'] == 0.0
     preparing = dashboard.video_progress(None)
     assert preparing['phase'] == 'preparing' and preparing['percent'] is None
     nan = dashboard.video_progress(_progress(
