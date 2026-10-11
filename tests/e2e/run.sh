@@ -58,6 +58,16 @@ http_code() {  # http_code [curl args...] URL
   curl -s -o /dev/null -w '%{http_code}' "$@"
 }
 
+csp_strict() {  # csp_strict response-headers -> the dashboard's strict CSP
+  # Nothing by default, only the app itself for scripts, styles, images and
+  # fetches: no external host, scheme, wildcard or 'unsafe-*' source.
+  local csp
+  csp="$(grep -i '^content-security-policy:' <<<"$1")" || return 1
+  grep -q "default-src 'none'" <<<"$csp" && grep -q "style-src 'self'" <<<"$csp" &&
+    grep -q "connect-src 'self'" <<<"$csp" &&
+    ! grep -qiE "https?:|wss?:|data:|blob:|[*]|unsafe-" <<<"$csp"
+}
+
 new_config() {  # new_config name -> prints dir with config/ and downloads/
   local dir="$WORK/$1"
   mkdir -p "$dir/config" "$dir/downloads"
@@ -72,6 +82,53 @@ if [ -z "${E2E_SKIP_BUILD:-}" ]; then
   echo "== Building $IMAGE ${E2E_BUILD_ARGS:-}"
   docker build "${build_args[@]}" -t "$IMAGE" . || { echo "build failed"; exit 1; }
 fi
+
+job_state() {  # job_state id -> state of that manual job in $BASE/api/status
+  local json
+  json="$(curl -sf -u "$USER_NAME:$USER_PASS" "$BASE/api/status")" || return 1
+  python3 -I -c '
+import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for job in jobs["running"] + jobs["queued"] + jobs["finished"]:
+    if job["id"] == sys.argv[1]:
+        print(job["state"])
+' "$1" <<<"$json"
+}
+job_finished() { case "$(job_state "$1")" in done|failed) return 0 ;; esac; return 1; }
+
+STATUS_DIR=/config/.youtube-dl-status
+pass_events_ok() {  # pass_events_ok container -> run_start and run_end (with 'next')
+  # Read as abc: the status directory is 0700.
+  docker exec -u abc "$1" /opt/venv/bin/python3 -I -c '
+import json, sys
+seen = set()
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        event = json.loads(line)
+        if event.get("t") == "run_start":
+            seen.add("start")
+        elif event.get("t") == "run_end" and isinstance(event.get("next"), int):
+            seen.add("end")
+sys.exit(seen != {"start", "end"})
+' "$STATUS_DIR/events.jsonl"
+}
+pass_nonce() {  # pass_nonce container -> the nonce of the newest run_start
+  docker exec -u abc "$1" /opt/venv/bin/python3 -I -c '
+import json, sys
+nonce = ""
+with open(sys.argv[1], encoding="utf-8") as f:
+    for line in f:
+        event = json.loads(line)
+        if event.get("t") == "run_start":
+            nonce = event["nonce"]
+print(nonce)
+' "$STATUS_DIR/events.jsonl"
+}
+served_without_nonce() {  # served_without_nonce nonce path -> 200, non-empty, no nonce
+  local body
+  body="$(curl -sf -u "$USER_NAME:$USER_PASS" "$BASE$2")" || return 1
+  [ -n "$body" ] && ! grep -qF -e "$1" <<<"$body" && ! grep -qE '@@ytdl:[0-9a-f]{16}' <<<"$body"
+}
 
 ########################################################################
 echo "== Scenario A: web UI with credentials, PUID=1026/PGID=100"
@@ -107,10 +164,17 @@ check "API token does not open config editing (401)" \
   test "$(http_code -H "Authorization: Bearer $API_TOKEN" "$BASE/edit/args")" = 401
 check "static app.js served" \
   test "$(http_code "$BASE/static/app.js")" = 200
+check "static app.css served without auth" \
+  test "$(http_code "$BASE/static/app.css")" = 200
+check "GET /api/status with Basic auth (200)" \
+  test "$(http_code -u "$USER_NAME:$USER_PASS" "$BASE/api/status")" = 200
+check "API token does not read /api/status (401)" \
+  test "$(http_code -H "Authorization: Bearer $API_TOKEN" "$BASE/api/status")" = 401
 
 headers="$(curl -s -D - -o /dev/null -u "$USER_NAME:$USER_PASS" "$BASE/")"
 check "CSP header with script-src 'self'" grep -qi "content-security-policy:.*script-src 'self'" <<<"$headers"
 check "X-Frame-Options DENY" grep -qi 'x-frame-options: DENY' <<<"$headers"
+check "CSP is default-src 'none' without external hosts or unsafe-inline" csp_strict "$headers"
 
 csrf="$(curl -s -u "$USER_NAME:$USER_PASS" "$BASE/" | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')"
 check "CSRF token present in forms" test -n "$csrf"
@@ -130,8 +194,15 @@ payload="https://example.invalid/x';touch\${IFS}/config/PWNED_url;'"
 resp="$(curl -s -H "Authorization: Bearer $API_TOKEN" --data-urlencode "url=$payload" "$BASE/api/download")"
 dl_id="$(sed -n 's/.*"id":"\([0-9a-f-]*\)".*/\1/p' <<<"$resp")"
 check "API download with shell metacharacters returns an id" test -n "$dl_id"
+# The iOS Shortcut shows 'message'; 'state' and 'position' say where it is.
+check "token answer carries state, position and message" \
+  sh -c 'printf "%s" "$1" | grep -Eq "\"state\":\"(queued|running|failed|done)\"" &&
+    printf "%s" "$1" | grep -q "\"position\":" && printf "%s" "$1" | grep -q "\"message\":\""' sh "$resp"
 check "download process finishes and logs" \
   wait_for 60 sh -c "curl -s -u '$USER_NAME:$USER_PASS' $BASE/log/download/$dl_id | grep -q 'Download process ended'"
+# The dashboard must show the job as finished, never stuck as queued/running.
+check "manual job reaches done or failed in /api/status" \
+  wait_for 60 job_finished "$dl_id"
 check "token on POST /download answers JSON (iOS shortcut)" \
   sh -c "curl -s -H 'Authorization: Bearer $API_TOKEN' --data-urlencode 'url=https://example.invalid/t' $BASE/download | grep -q '\"id\"'"
 check "URL with surrounding whitespace accepted" \
@@ -159,8 +230,24 @@ else
 fi
 check "channels.txt payload reached yt-dlp as literal arguments" \
   sh -c "docker logs $CA 2>&1 | grep -q \"invalid integer value: '1;'\""
+
+# Dashboard events. Checked before the restart below, which would cut the
+# pass short before its run_end. The run_end is written after the summary
+# lines, so wait for it.
+check "events.jsonl has the pass's run_start and run_end with 'next'" \
+  wait_for 60 pass_events_ok "$CA"
+check "events.jsonl owned by PUID 1026 with mode 0600, its directory 0700" \
+  test "$(docker exec "$CA" stat -c '%u %a' "$STATUS_DIR" "$STATUS_DIR/events.jsonl" | tr '\n' ' ')" = '1026 700 1026 600 '
+check "the pass log carries the event markers (web UI on)" log_has "$CA" -E '@@ytdl:[0-9a-f]{16}'
+nonce="$(pass_nonce "$CA")"
+check "the pass's nonce is known" test -n "$nonce"
+for path in /api/status /log/youtube-dl '/api/log/youtube-dl?since=0' "/api/log/download/$dl_id?since=0"; do
+  check "nonce never leaves the server ($path)" served_without_nonce "$nonce" "$path"
+done
+# confirm=1: the pass may still be writing its summary, and while a pass
+# runs, 'Run now' answers 409 unless the client confirms the abort.
 check "restart via POST with CSRF token (303)" \
-  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" "$BASE/restart-youtube-dl")" = 303
+  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" --data-urlencode confirm=1 "$BASE/restart-youtube-dl")" = 303
 
 # The marker checks only mean something if the payloads were actually processed.
 for marker in PWNED_channels PWNED_args PWNED_url PWNED_opt PWNED_exec; do
@@ -276,6 +363,7 @@ BASE_D="http://127.0.0.1:$((PORT + 2))"
 check "web UI under base path (200)" \
   wait_for 90 sh -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -u '$USER_NAME:$USER_PASS' $BASE_D/yt/)\" = 200 ]"
 check "static under base path (200)" test "$(http_code "$BASE_D/yt/static/app.js")" = 200
+check "stylesheet under base path (200)" test "$(http_code "$BASE_D/yt/static/app.css")" = 200
 check "page links use the base path" \
   sh -c "curl -s -u '$USER_NAME:$USER_PASS' $BASE_D/yt/ | grep -q 'src=\"/yt/static/app.js\"'"
 # supervisor reports RUNNING only after startsecs (1 s), so wait for it.
@@ -289,12 +377,21 @@ echo "== Scenario E: youtubedl_interval=false runs one pass, then the container 
 E="$(new_config e)"
 CE=e2e-e
 CONTAINERS+=("$CE")
-# Default config: channels.txt has no URLs, so no download is attempted.
+# Web UI off (the default). One unresolvable URL, so yt-dlp really runs.
+printf '%s\n' 'https://example.invalid/oneshot-channel' > "$E/config/channels.txt"
 docker run -d --name "$CE" -e youtubedl_interval=false \
   -v "$E/config:/config" -v "$E/downloads:/downloads" "$IMAGE" >/dev/null
 check "container exits by itself" \
   wait_for 120 sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' $CE)\" = false ]"
 check "exit announced in the log" log_has "$CE" 'container will now exit'
+# Without the web UI there are no dashboard events: no markers or flags in the
+# log and no status directory (positive signal: yt-dlp ran the entry).
+web_ui_off_without_events() {
+  log_has "$1" 'ERROR: \[generic\] oneshot-channel' && ! log_has "$1" '@@ytdl:' &&
+    ! log_has "$1" 'Writing .{"v":1' && test ! -e "$2/config/.youtube-dl-status"
+}
+check "web UI off: no event markers in the log, no status directory" \
+  web_ui_off_without_events "$CE" "$E"
 # On exit, autorestart must not have begun a second pass before the shutdown.
 # Count supervisord's spawns: whether a second pass gets as far as printing
 # 'starting execution' before the shutdown stops it is a race.

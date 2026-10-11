@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{#- Error answers for browser navigation (forms without JavaScript, unknown
+    pages). API clients keep getting JSON. #}
+{% block title %}{{ title }} · youtube-dl{% endblock %}
+
+{% block content %}
+<a class="back" href="{{ base_path }}/">← Back to dashboard</a>
+<section class="panel" aria-labelledby="error-h">
+  <div class="row">
+    <span class="chip chip-m {{ tone }}">{{ status_code }}</span>
+    <h1 id="error-h">{{ title }}</h1>
+  </div>
+  {% if message %}<p>{{ message }}</p>{% endif %}
+  {% if confirm_restart %}
+  <form method="post" action="{{ base_path }}/restart-youtube-dl" class="editor-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="confirm" value="1">
+    <a class="btn" href="{{ base_path }}/">Cancel</a>
+    <button type="submit" class="btn btn-danger">Abort &amp; restart</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

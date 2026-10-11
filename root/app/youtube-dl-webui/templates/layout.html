@@ -1,44 +1,117 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="en" class="no-js">
 <head>
-    <meta charset="UTF-8">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/semantic-ui@2.4.2/dist/semantic.min.css">
-    <title>youtube-dl</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}youtube-dl{% endblock %}</title>
+<link rel="icon" href="{{ base_path }}/favicon.ico">
+<link rel="stylesheet" href="{{ base_path }}/static/app.css">
+<script src="{{ base_path }}/static/app.js" defer></script>
 </head>
-
-<body>
-    <div class="ui inverted menu">
-        <a href="{{ base_path }}/" class="item"><i class="home icon"></i>Dashboard</a>
-        <form class="item" method="post" action="{{ base_path }}/restart-youtube-dl" style="padding:0;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="ui inverted button" style="margin:7px;"><i class="sync alternate icon"></i>Restart youtube-dl</button>
-        </form>
-        <div class="ui simple dropdown item">Edit<i class="dropdown icon"></i>
-            <div class="menu">
-                <a class="item" href="{{ base_path }}/edit/args">Args</a>
-                <a class="item" href="{{ base_path }}/edit/archive">Archive</a>
-                <a class="item" href="{{ base_path }}/edit/channels">Channels</a>
-            </div>
-        </div>
-        <form class="item" method="post" action="{{ base_path }}/download"  style="flex-grow:1;">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <div class="ui action input">
-                <input type="text" name="url" placeholder="URL">
-                <button class="ui teal right labeled icon button">
-                    <i class="download icon"></i>
-                    Download
-                </button>
-            </div>
-        </form>
-        <div class="right menu">
-            <a href="https://github.com/jannik000/youtube-dl" class=" item"><i
-                    class="github icon"></i>youtube-dl</a>
-        </div>
+{#- Everything the script needs comes from data attributes: there are no
+    inline scripts or styles (CSP script-src 'self'; style-src 'self'). #}
+<body data-base-path="{{ base_path }}" data-csrf-token="{{ csrf_token }}"
+      data-page="{{ page }}" data-download-id="{{ download_id or '' }}"
+      data-readonly="{{ 'true' if readonly else 'false' }}"
+      data-parallel="{{ parallel }}" data-max-queued="{{ max_queued }}">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="{{ base_path }}/">
+      <span class="brand-mark"><svg class="ic ic-m ic-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg></span>
+      youtube-dl
+    </a>
+    <a id="pill" class="pill tone-idle needs-js" href="{{ base_path }}/#now"><span id="pill-text">Loading…</span></a>
+    <form id="dl-form" class="dl-form" method="post" action="{{ base_path }}/download">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="dl-row">
+        <label for="dl-url" class="visually-hidden">Video, channel or playlist URL</label>
+        <input id="dl-url" name="url" type="url" inputmode="url" autocapitalize="off"
+               autocomplete="off" spellcheck="false" enterkeyhint="go" required
+               placeholder="Paste a YouTube link…">
+        <button type="submit" class="btn btn-primary">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Download
+        </button>
+        <details class="menu dl-options">
+          <summary class="btn btn-icon" aria-label="Download options" title="Download options">
+            <svg class="ic ic-l ic-fill" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+          </summary>
+          <div class="menu-pop">
+            <label class="check"><input type="checkbox" name="force" value="1"><span>Re-download even if already in the archive</span></label>
+          </div>
+        </details>
+      </div>
+      <p id="dl-hint" class="field-hint fg-warn" hidden>
+        <svg class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+        This downloads the whole channel or playlist.
+      </p>
+    </form>
+    <div class="actions">
+      <form id="run-form" method="post" action="{{ base_path }}/restart-youtube-dl">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn">
+          <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          Run now
+        </button>
+      </form>
+      <details class="menu edit-menu">
+        <summary class="btn">
+          Edit
+          <svg class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        <nav class="menu-pop" aria-label="Edit configuration">
+          <a href="{{ base_path }}/edit/args">Args (args.conf){% if readonly %}<span class="tag">read-only</span>{% endif %}</a>
+          <a href="{{ base_path }}/edit/channels">Channels{% if readonly %}<span class="tag">read-only</span>{% endif %}</a>
+          <a href="{{ base_path }}/edit/archive">Archive{% if readonly %}<span class="tag">read-only</span>{% endif %}</a>
+        </nav>
+      </details>
     </div>
+  </div>
+</header>
 
-    {% block content %}
-    {% endblock %}
+<main class="page" id="top">
+  <div id="toast" class="toast tone-ok" role="status" hidden>
+    <span id="toast-text" class="toast-text"></span>
+    <a id="toast-link" hidden></a>
+    <button type="button" id="toast-close" class="toast-close" aria-label="Dismiss">✕</button>
+  </div>
+  <div id="banners" class="stack needs-js" aria-live="polite"></div>
+  {% block content %}{% endblock %}
+  <footer class="footer">
+    <span id="footer-version">youtube-dl</span>
+    <span id="footer-updated" class="needs-js"></span>
+    <span>Based on Jeeaaasus/youtube-dl (MIT)</span>
+  </footer>
+</main>
+
+<div id="announce" class="visually-hidden" aria-live="polite"></div>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title">
+  <div class="dialog-body">
+    <h2 id="confirm-title">Abort the running pass and start over?</h2>
+    <p class="muted">The current download stops. Videos that are already finished stay in the archive; the next pass starts right away.</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="confirm-cancel">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-ok">Abort &amp; restart</button>
+    </div>
+  </div>
+</dialog>
+
+{#- Icons the script clones (it never parses markup). #}
+<template id="icons">
+  <svg data-icon="dot" class="ic ic-dot ic-fill" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>
+  <svg data-icon="moon" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  <svg data-icon="alert" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+  <svg data-icon="check" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+  <svg data-icon="x" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+  <svg data-icon="skip" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 10 5 5-5 5"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></svg>
+  <svg data-icon="filter" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+  <svg data-icon="ban" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>
+  <svg data-icon="archive" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg>
+  <svg data-icon="info" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+  <svg data-icon="play" class="ic ic-m ic-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
+  <svg data-icon="clock" class="ic ic-m" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+</template>
 </body>
-
 </html>

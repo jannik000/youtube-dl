@@ -40,7 +40,11 @@ jobs:
           pip install pytest httpx pip-audit
 
       - name: Run tests
-        run: pytest -q root/app/youtube-dl-webui/tests
+        # Strict yt-dlp contract test (fails instead of skipping), see release.yml.
+        run: |
+          YTDLP_CONTRACT_VERSION="$(cat release-versions/latest.txt)"
+          export YTDLP_CONTRACT_VERSION
+          pytest -q -rs root/app/youtube-dl-webui/tests
 
       - name: Audit pinned dependencies for known CVEs
         run: pip-audit -r root/app/requirements.txt --strict

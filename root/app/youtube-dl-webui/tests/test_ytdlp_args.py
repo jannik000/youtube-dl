@@ -153,6 +153,23 @@ def test_paths_resolving_outside_downloads_rejected(content):
 
 
 @pytest.mark.parametrize('content', [
+    "--print-to-file title '/config/.youtube-dl-status/events.jsonl'",
+    "--print-to-file 'video:{\"v\":1}' .youtube-dl-status/events.jsonl",
+    "-P /downloads --print-to-file title '../config/.youtube-dl-status/events.jsonl'",
+    "--download-archive /config/.youtube-dl-status/events.jsonl",
+    "-o '/config/.youtube-dl-status/%(id)s'",
+    "-P temp:/config/.youtube-dl-status",
+])
+def test_dashboard_event_file_cannot_be_written(content):
+    # Only youtube-dl.sh and the web UI may append events (the flags are
+    # added by trusted code after the user's arguments).
+    with pytest.raises(ytdlp_args.ArgsError):
+        ytdlp_args.validate_args_conf(content)
+    with pytest.raises(ytdlp_args.ArgsError):
+        ytdlp_args.validate_channels(f'https://example.invalid/c | {content}\n')
+
+
+@pytest.mark.parametrize('content', [
     "--output '/downloads/%(uploader)s/%(title)s.%(ext)s'",
     "--output '/downloads/sub/%(title)s.%(ext)s'",
     "--download-archive '/config/archive.txt'",  # explicitly allowed exception

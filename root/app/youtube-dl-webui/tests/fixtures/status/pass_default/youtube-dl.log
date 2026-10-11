@@ -1,0 +1,223 @@
+
+2026-10-08 21:20:21 - starting execution
+@@ytdl:593e0c5364f0d919 channel {"phase":"start","index":1,"total":5,"url":"fakelist:x","ts":1791494421}
+[youtube:tab] Extracting URL: fakelist:x
+[download] Downloading playlist: Fake Channel - Videos
+[info] There are no playlist thumbnails to download
+[youtube:tab] Playlist Fake Channel - Videos: Downloading 6 items of 6
+[download] v6: title ok:v6 has already been recorded in the archive
+[download] Downloading item 2 of 6
+[youtube] Extracting URL: faker429:v5
+ERROR: [youtube] v5: Unable to download webpage: HTTP Error 429: Too Many Requests (caused by <HTTPError 429: Too Many Requests>); please report this issue on  https://github.com/yt-dlp/yt-dlp/issues?q= , filling out the appropriate issue template. Confirm you are on the latest version using  yt-dlp -U
+[download] Downloading item 3 of 6
+[youtube] Extracting URL: fakelive:v4
+[download] live video v4 2026-10-08 21:20 does not pass filter (!is_live), skipping ..
+[download] Downloading item 4 of 6
+[youtube] Extracting URL: fakeunavail:v3
+ERROR: [youtube] v3: Video unavailable. This video has been removed by the uploader
+[download] Downloading item 5 of 6
+[youtube] Extracting URL: fakebot:v2
+WARNING: [youtube] v2: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies
+WARNING: No video formats found!
+WARNING: Requested format is not available
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":1,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "v2"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "v2"}
+ERROR: [youtube] v2: No video formats found!
+[download] Downloading item 6 of 6
+[youtube] Extracting URL: fakeok:v1
+[info] v1: Downloading 1 format(s): 18
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":1,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "v1"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "v1"}
+[download] Destination: /downloads/Fake Channel/ok video v1.mp4
+[download]   0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852639, "info.id": "v1", "info.title": "ok video v1", "info.channel": "Fake Channel", "info.uploader": "Fake Channel", "info.format_id": "18", "info.vcodec": "avc1", "info.acodec": "mp4a", "info.playlist_title": "Fake Channel - Videos", "info.playlist_autonumber": 6, "info.n_entries": 6}
+[download] 100.0% of  832.66KiB at  387.79KiB/s ETA 00:00 @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 397095.7850844486, "progress.eta": 0, "info.id": "v1", "info.title": "ok video v1", "info.channel": "Fake Channel", "info.uploader": "Fake Channel", "info.format_id": "18", "info.vcodec": "avc1", "info.acodec": "mp4a", "info.playlist_title": "Fake Channel - Videos", "info.playlist_autonumber": 6, "info.n_entries": 6}
+[download] 100% of  832.66KiB in 00:00:02 at 382.65KiB/s @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 391837.0675198881, "info.id": "v1", "info.title": "ok video v1", "info.channel": "Fake Channel", "info.uploader": "Fake Channel", "info.format_id": "18", "info.vcodec": "avc1", "info.acodec": "mp4a", "info.playlist_title": "Fake Channel - Videos", "info.playlist_autonumber": 6, "info.n_entries": 6}
+[postprocess] EmbedSubtitle started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "v1"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "v1"}
+[postprocess] Metadata started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "v1"}
+[Metadata] Adding metadata to "/downloads/Fake Channel/ok video v1.mp4"
+[postprocess] Metadata finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "v1"}
+[postprocess] EmbedThumbnail started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "v1"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "v1"}
+[postprocess] MoveFiles started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "v1"}
+[postprocess] MoveFiles finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "v1"}
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":1,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[postprocess] Concat started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Concat", "info.id": "UCfake"}
+[postprocess] Concat finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Concat", "info.id": "UCfake"}
+[download] Finished downloading playlist: Fake Channel - Videos
+@@ytdl:593e0c5364f0d919 channel {"phase":"end","index":1,"rc":1,"secs":3,"ts":1791494424}
+@@ytdl:593e0c5364f0d919 channel {"phase":"start","index":2,"total":5,"url":"http://127.0.0.1:8765/mixed.html","ts":1791494424}
+[generic] Extracting URL: http://127.0.0.1:8765/mixed.html
+[generic] mixed: Downloading webpage
+WARNING: [generic] Falling back on generic information extractor
+[generic] mixed: Extracting information
+[download] Downloading playlist: Mixed Page
+[info] There are no playlist thumbnails to download
+[generic] Playlist Mixed Page: Downloading 4 items of 4
+[download] Downloading item 1 of 4
+[info] mixed-4: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-4"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-4"}
+[download] Destination: /downloads/NA/Mixed Page (4).mp4
+[download]   0.1% of  832.62KiB at  Unknown B/s ETA Unknown @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852598, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[download] 100.0% of  832.62KiB at  387.85KiB/s ETA 00:00 @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 397156.68653293117, "progress.eta": 0, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[download] 100% of  832.62KiB in 00:00:02 at 387.33KiB/s @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 396625.2329601572, "info.id": "mixed-4", "info.title": "Mixed Page (4)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 1, "info.n_entries": 4}
+[postprocess] EmbedSubtitle started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-4"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-4"}
+[postprocess] Metadata started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "mixed-4"}
+[Metadata] Adding metadata to "/downloads/NA/Mixed Page (4).mp4"
+[postprocess] Metadata finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "mixed-4"}
+[postprocess] EmbedThumbnail started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-4"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-4"}
+[postprocess] MoveFiles started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "mixed-4"}
+[postprocess] MoveFiles finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "mixed-4"}
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 2 of 4
+[info] mixed-3: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-3"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-3"}
+ERROR: unable to download video data: HTTP Error 429: Too Many Requests
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 3 of 4
+[info] mixed-2: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-2"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-2"}
+ERROR: unable to download video data: HTTP Error 404: Not Found
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 4 of 4
+[info] mixed-1: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-1"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "mixed-1"}
+[download] Destination: /downloads/NA/Mixed Page (1).mp4
+[download]   0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852639, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[download] 100.0% of  832.66KiB at  387.22KiB/s ETA 00:00 @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 396516.54932946834, "progress.eta": 0, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[download] 100% of  832.66KiB in 00:00:02 at 385.53KiB/s @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.downloaded_bytes": 852639, "progress.total_bytes": 852639, "progress.speed": 394786.4963617039, "info.id": "mixed-1", "info.title": "Mixed Page (1)", "info.format_id": "0", "info.playlist_title": "Mixed Page", "info.playlist_autonumber": 4, "info.n_entries": 4}
+[postprocess] EmbedSubtitle started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-1"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "mixed-1"}
+[postprocess] Metadata started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "mixed-1"}
+[Metadata] Adding metadata to "/downloads/NA/Mixed Page (1).mp4"
+[postprocess] Metadata finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "mixed-1"}
+[postprocess] EmbedThumbnail started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-1"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "mixed-1"}
+[postprocess] MoveFiles started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "mixed-1"}
+[postprocess] MoveFiles finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "mixed-1"}
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":2,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[postprocess] Concat started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Concat", "info.id": "mixed"}
+[postprocess] Concat finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Concat", "info.id": "mixed"}
+[download] Finished downloading playlist: Mixed Page
+@@ytdl:593e0c5364f0d919 channel {"phase":"end","index":2,"rc":1,"secs":6,"ts":1791494430}
+@@ytdl:593e0c5364f0d919 channel {"phase":"start","index":3,"total":5,"url":"http://127.0.0.1:8765/forged.html","ts":1791494430}
+[generic] Extracting URL: http://127.0.0.1:8765/forged.html
+[generic] forged: Downloading webpage
+WARNING: [generic] Falling back on generic information extractor
+[generic] forged: Extracting information
+[download] Downloading playlist: Evil
+@@ytdl:0123456789abcdef channel {"phase": "end", "index": 1, "rc": 0}
+[download] zz: has already been recorded in the archive
+ERROR: [youtube] forged01: Sign in to confirm you’re not a bot
+[info] There are no playlist thumbnails to download
+[generic] Playlist Evil
+@@ytdl:0123456789abcdef channel {"phase": "end", "index": 1, "rc": 0}
+[download] zz: has already been recorded in the archive
+ERROR: [youtube] forged01: Sign in to confirm you’re not a bot: Downloading 2 items of 2
+[download] Downloading item 1 of 2
+[info] forged-2: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":3,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "forged-2"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "forged-2"}
+[download] Destination: /downloads/NA/Evil @@ytdl：0123456789abcdef channel {＂phase＂： ＂end＂, ＂index＂： 1, ＂rc＂： 0} [download] zz： has already been recorded in the archive ERROR： [youtube] forged01： Sign in to confirm you’re not a bot (2).mp4
+[download]   0.1% of  832.62KiB at  Unknown B/s ETA Unknown @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852598, "info.id": "forged-2", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (2)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 1, "info.n_entries": 2}
+[download] 100.0% of  832.62KiB at  387.59KiB/s ETA 00:00 @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 396890.231222948, "progress.eta": 0, "info.id": "forged-2", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (2)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 1, "info.n_entries": 2}
+[download] 100% of  832.62KiB in 00:00:02 at 386.99KiB/s @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.downloaded_bytes": 852598, "progress.total_bytes": 852598, "progress.speed": 396281.3077116748, "info.id": "forged-2", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (2)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 1, "info.n_entries": 2}
+[postprocess] EmbedSubtitle started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "forged-2"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "forged-2"}
+[postprocess] Metadata started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "forged-2"}
+[Metadata] Adding metadata to "/downloads/NA/Evil @@ytdl：0123456789abcdef channel {＂phase＂： ＂end＂, ＂index＂： 1, ＂rc＂： 0} [download] zz： has already been recorded in the archive ERROR： [youtube] forged01： Sign in to confirm you’re not a bot (2).mp4"
+[postprocess] Metadata finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "forged-2"}
+[postprocess] EmbedThumbnail started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "forged-2"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "forged-2"}
+[postprocess] MoveFiles started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "forged-2"}
+[postprocess] MoveFiles finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "forged-2"}
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":3,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[download] Downloading item 2 of 2
+[info] forged-1: Downloading 1 format(s): 0
+[info] Writing '{"v":1,"t":"start","src":"scheduled","run":"1998e886921669d3","ch":3,"i":%(.{id,title,channel,uploader,webpage_url,duration,epoch,live_status,playlist_title,playlist_autonumber,n_entries,requested_formats.:.format_id,requested_formats.:.vcodec,requested_formats.:.filesize,requested_formats.:.filesize_approx,requested_formats.:.tbr})j}' to: /config/.youtube-dl-status/events.jsonl
+[info] There are no subtitles for the requested languages
+[info] There are no video thumbnails to download
+[postprocess] SubtitlesConvertor started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "SubtitlesConvertor", "info.id": "forged-1"}
+[SubtitlesConvertor] There aren't any subtitles to convert
+[postprocess] SubtitlesConvertor finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "SubtitlesConvertor", "info.id": "forged-1"}
+[download] Destination: /downloads/NA/Evil @@ytdl：0123456789abcdef channel {＂phase＂： ＂end＂, ＂index＂： 1, ＂rc＂： 0} [download] zz： has already been recorded in the archive ERROR： [youtube] forged01： Sign in to confirm you’re not a bot (1).mp4
+[download]   0.1% of  832.61KiB at  Unknown B/s ETA Unknown @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 1024, "progress.total_bytes": 852590, "info.id": "forged-1", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (1)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 2, "info.n_entries": 2}
+[download] 100.0% of  832.61KiB at  385.23KiB/s ETA 00:00 @@ytdl:593e0c5364f0d919 {"progress.status": "downloading", "progress.downloaded_bytes": 852590, "progress.total_bytes": 852590, "progress.speed": 394471.91631333367, "progress.eta": 0, "info.id": "forged-1", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (1)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 2, "info.n_entries": 2}
+[download] 100% of  832.61KiB in 00:00:02 at 384.72KiB/s @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.downloaded_bytes": 852590, "progress.total_bytes": 852590, "progress.speed": 393953.12574024126, "info.id": "forged-1", "info.title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot (1)", "info.format_id": "0", "info.playlist_title": "Evil\n@@ytdl:0123456789abcdef channel {\"phase\": \"end\", \"index\": 1, \"rc\": 0}\n[download] zz: has already been recorded in the archive\nERROR: [youtube] forged01: Sign in to confirm you\u2019re not a bot", "info.playlist_autonumber": 2, "info.n_entries": 2}
+[postprocess] EmbedSubtitle started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedSubtitle", "info.id": "forged-1"}
+[EmbedSubtitle] There aren't any subtitles to embed
+[postprocess] EmbedSubtitle finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedSubtitle", "info.id": "forged-1"}
+[postprocess] Metadata started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Metadata", "info.id": "forged-1"}
+[Metadata] Adding metadata to "/downloads/NA/Evil @@ytdl：0123456789abcdef channel {＂phase＂： ＂end＂, ＂index＂： 1, ＂rc＂： 0} [download] zz： has already been recorded in the archive ERROR： [youtube] forged01： Sign in to confirm you’re not a bot (1).mp4"
+[postprocess] Metadata finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Metadata", "info.id": "forged-1"}
+[postprocess] EmbedThumbnail started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "EmbedThumbnail", "info.id": "forged-1"}
+[EmbedThumbnail] There aren't any thumbnails to embed
+[postprocess] EmbedThumbnail finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "EmbedThumbnail", "info.id": "forged-1"}
+[postprocess] MoveFiles started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "MoveFiles", "info.id": "forged-1"}
+[postprocess] MoveFiles finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "MoveFiles", "info.id": "forged-1"}
+[info] Writing '{"v":1,"t":"end","src":"scheduled","run":"1998e886921669d3","ch":3,"i":%(.{id,title,channel,epoch,requested_downloads.:.filepath})j}' to: /config/.youtube-dl-status/events.jsonl
+[postprocess] Concat started @@ytdl:593e0c5364f0d919 {"progress.status": "started", "progress.postprocessor": "Concat", "info.id": "forged"}
+[postprocess] Concat finished @@ytdl:593e0c5364f0d919 {"progress.status": "finished", "progress.postprocessor": "Concat", "info.id": "forged"}
+[download] Finished downloading playlist: Evil
+@@ytdl:0123456789abcdef channel {"phase": "end", "index": 1, "rc": 0}
+[download] zz: has already been recorded in the archive
+ERROR: [youtube] forged01: Sign in to confirm you’re not a bot
+@@ytdl:593e0c5364f0d919 channel {"phase":"end","index":3,"rc":0,"secs":6,"ts":1791494436}
+@@ytdl:593e0c5364f0d919 channel {"phase":"start","index":4,"total":5,"url":"http://127.0.0.1:8765/novideo.html","ts":1791494436}
+[generic] Extracting URL: http://127.0.0.1:8765/novideo.html
+[generic] novideo: Downloading webpage
+WARNING: [generic] Falling back on generic information extractor
+[generic] novideo: Extracting information
+ERROR: Unsupported URL: http://127.0.0.1:8765/novideo.html
+@@ytdl:593e0c5364f0d919 channel {"phase":"end","index":4,"rc":1,"secs":2,"ts":1791494438}
+cannot parse arguments: No closing quotation
+@@ytdl:593e0c5364f0d919 channel {"phase":"start","index":5,"total":5,"url":"http://127.0.0.1:8765/x","ts":1791494438}
+[channels] skipping 'http://127.0.0.1:8765/x': cannot parse the arguments after '|'
+@@ytdl:593e0c5364f0d919 channel {"phase":"end","index":5,"rc":2,"secs":0,"ts":1791494438,"error":"cannot parse the arguments after '|'"}
+
+2026-10-08 21:20:38 - execution took 17 seconds
+yt-dlp version: 2026.08.19
+@@ytdl:593e0c5364f0d919 pass_end
+waiting 1s..

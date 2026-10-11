@@ -21,6 +21,13 @@ def _env(name):
     return value if value else None
 
 
+def _parallel(value):
+    value = value.strip()
+    if not (value.isascii() and value.isdigit()):   # '\u00b2'.isdigit()
+        return 1
+    return max(1, min(3, int(value)))
+
+
 class Config:
     """Resolved auth configuration, built once at startup."""
 
@@ -35,6 +42,9 @@ class Config:
         self.allowed_domains = tuple(
             d.strip().lower().lstrip('.') for d in allowed.split(',') if d.strip()
         ) if allowed else ()
+        # Manual downloads running at once (1-3); anything else means 1.
+        self.max_parallel = _parallel(os.environ.get(
+            'WEBUI_MAX_PARALLEL_DOWNLOADS', ''))
         # New random token per process start; embedded in forms, never stored.
         self.csrf_token = secrets.token_urlsafe(32)
 
@@ -165,19 +175,19 @@ def validate_download_url(url, config):
 def security_headers():
     """Response headers applied to every response.
 
-    Scripts are served as static files ('self' only), so no inline-script
-    nonce is needed. Inline styles stay allowed for the template style
-    attributes. The Semantic UI stylesheet on the CDN imports the Lato font
-    from Google Fonts and embeds its icon fonts as data: URIs."""
+    The CSP allows nothing by default and only same-origin scripts, styles,
+    images and fetches: the stylesheet and the script are served by the app
+    itself, the templates have no inline scripts, style attributes or
+    <style> blocks, and the pages use system fonts (no font-src)."""
     csp = (
-        "default-src 'self'; "
+        "default-src 'none'; "
         "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net "
-        "https://fonts.googleapis.com; "
-        "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; "
-        "img-src 'self' data:; "
+        "style-src 'self'; "
+        "img-src 'self'; "
         "connect-src 'self'; "
-        "frame-ancestors 'none'; form-action 'self'; base-uri 'none'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
         "object-src 'none'"
     )
     return {
