@@ -177,8 +177,10 @@ def create_app():
         sys.stderr.write(
             f'[web-ui] refusing to start: {startup_error}. Set credentials via '
             'environment variables (WEBUI_USERNAME/WEBUI_PASSWORD and/or '
-            'WEBUI_API_TOKEN).\n')
+            'WEBUI_API_TOKEN) or their *_FILE variants.\n')
         raise SystemExit(1)
+    for note in config.notes:   # names only, never a value
+        sys.stderr.write(f'[web-ui] {note}\n')
 
     templates = Jinja2Templates(directory=f'{PATHS.app_dir}/templates')
     format_default = _read_format_default()

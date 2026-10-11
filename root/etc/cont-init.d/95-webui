@@ -1,0 +1,43 @@
+#!/bin/bash
+# The youtubedl_* / WEBUI_* variables are provided by the container environment.
+# shellcheck disable=SC2154
+#
+# Runs after 90-user-permissions: credentials may come from files
+# (WEBUI_PASSWORD_FILE, WEBUI_API_TOKEN_FILE, WEBUI_USERNAME_FILE), which the
+# web UI reads as abc with the final PUID/PGID, so they are checked as that
+# user here. The check prints variable names and paths, never a value.
+
+conf=/etc/supervisor/conf.d/youtube-dl-webui.conf
+
+refuse() {
+  echo "[web-ui] Refusing to start the web UI (fail closed). The downloader keeps running."
+  rm -f "$conf"
+}
+
+if [ "$youtubedl_webui" != true ]; then
+  echo "[web-ui] webserver is disabled."
+  rm -f "$conf"
+  exit 0
+fi
+
+# Same code as the web UI's own startup check, run as the web UI user.
+if ! result="$(setpriv --reuid="$(id -u abc)" --regid="$(id -g abc)" --init-groups \
+      /opt/venv/bin/python3 -I /app/youtube-dl-webui/webui_security.py check-credentials 2>&1)"; then
+  while IFS= read -r line; do
+    [ -n "$line" ] && echo "[web-ui] $line"
+  done <<<"$result"
+  case "$result" in
+    *'no credentials configured'*)
+      echo "[web-ui] ERROR: web UI is enabled but no credentials are configured."
+      echo "[web-ui] Set WEBUI_USERNAME together with WEBUI_PASSWORD (browser login)"
+      echo "[web-ui] and/or WEBUI_API_TOKEN (API/shortcut); each also as *_FILE." ;;
+    *ERROR:*) ;;
+    *) echo "[web-ui] ERROR: the credential check could not run." ;;
+  esac
+  refuse
+  exit 0
+fi
+while IFS= read -r line; do
+  [ -n "$line" ] && echo "[web-ui] $line"
+done <<<"$result"
+echo "[web-ui] webserver is enabled."

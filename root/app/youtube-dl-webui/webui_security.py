@@ -1,6 +1,7 @@
 """Authentication, CSRF protection, security headers and URL validation.
 
-Credentials come only from environment variables and are compared with
+Credentials come only from environment variables, or from files named by
+``<NAME>_FILE`` variables (Docker/compose secrets), and are compared with
 ``secrets.compare_digest``. If the web UI is enabled but no credentials are
 configured, the app fails closed (see ``load_credentials`` / ``Config``).
 """
@@ -8,6 +9,8 @@ configured, the app fails closed (see ``load_credentials`` / ``Config``).
 import base64
 import os
 import secrets
+import stat
+import sys
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, status
@@ -21,6 +24,76 @@ def _env(name):
     return value if value else None
 
 
+# Credentials that may also come from a file: <NAME>_FILE holds a path (e.g.
+# /run/secrets/...), so the value never appears in the container's
+# environment (docker inspect). Read by the web UI process itself, i.e. as
+# the unprivileged user with PUID/PGID: the file must be readable by it.
+SECRET_NAMES = ('WEBUI_USERNAME', 'WEBUI_PASSWORD', 'WEBUI_API_TOKEN')
+SECRET_FILE_MAX_BYTES = 64 * 1024
+
+
+def _read_secret_file(name, path):
+    """The file's content without trailing whitespace. Raises ValueError with
+    a message that names the variable and the path, never the content."""
+    var = name + '_FILE'
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise ValueError(f'{var} points to {path}, which does not exist')
+    except PermissionError:
+        raise ValueError(
+            f'{var} points to {path}, which is not readable by the web UI '
+            f'user (uid {os.getuid()}, gid {os.getgid()}); make it readable '
+            f'for that user, e.g. mode 644') from None
+    except OSError as err:
+        raise ValueError(f'{var}: cannot open {path} ({err.strerror})') from None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f'{var} points to {path}, which is not a regular file')
+        data = b''
+        while len(data) <= SECRET_FILE_MAX_BYTES:
+            chunk = os.read(fd, SECRET_FILE_MAX_BYTES + 1 - len(data))
+            if not chunk:
+                break
+            data += chunk
+    except OSError as err:
+        raise ValueError(f'{var}: cannot read {path} ({err.strerror})') from None
+    finally:
+        os.close(fd)
+    if len(data) > SECRET_FILE_MAX_BYTES:
+        raise ValueError(f'{var}: {path} is larger than '
+                         f'{SECRET_FILE_MAX_BYTES // 1024} KiB')
+    try:
+        value = data.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ValueError(f'{var}: {path} is not valid UTF-8') from None
+    value = value.rstrip()   # trailing newline / whitespace from editors
+    if not value:
+        raise ValueError(f'{var} points to {path}, which is empty')
+    return value
+
+
+def _secret(name, notes, errors):
+    """<NAME> from the environment, or from the file <NAME>_FILE names.
+    Setting both is an error; so is a file that cannot be used (fail closed:
+    the caller refuses to start)."""
+    value = os.environ.get(name, '')
+    path = os.environ.get(name + '_FILE', '')
+    if value and path:
+        errors.append(f'{name} and {name}_FILE are both set; set only one '
+                      f'of them')
+        return None
+    if not path:
+        return value or None
+    try:
+        value = _read_secret_file(name, path)
+    except ValueError as err:
+        errors.append(str(err))
+        return None
+    notes.append(f'{name} set from {name}_FILE')
+    return value
+
+
 def _parallel(value):
     value = value.strip()
     if not (value.isascii() and value.isdigit()):   # '\u00b2'.isdigit()
@@ -32,9 +105,13 @@ class Config:
     """Resolved auth configuration, built once at startup."""
 
     def __init__(self):
-        self.username = _env('WEBUI_USERNAME')
-        self.password = _env('WEBUI_PASSWORD')
-        self.api_token = _env('WEBUI_API_TOKEN')
+        # Messages about the credentials' sources and problems; they name
+        # variables and paths only, never a value.
+        self.notes = []
+        self.errors = []
+        self.username = _secret('WEBUI_USERNAME', self.notes, self.errors)
+        self.password = _secret('WEBUI_PASSWORD', self.notes, self.errors)
+        self.api_token = _secret('WEBUI_API_TOKEN', self.notes, self.errors)
         self.readonly = os.environ.get('WEBUI_READONLY', '').lower() == 'true'
         self.allow_unsafe_args = (
             os.environ.get('WEBUI_ALLOW_UNSAFE_ARGS', '').lower() == 'true')
@@ -54,9 +131,12 @@ class Config:
 
     def startup_error(self):
         """Return a human-readable reason the UI must not start, or None."""
+        if self.errors:
+            return '; '.join(self.errors)
         if not (self.has_basic_auth or self.api_token):
             return ('no credentials configured: set WEBUI_USERNAME and '
-                    'WEBUI_PASSWORD, and/or WEBUI_API_TOKEN')
+                    'WEBUI_PASSWORD (or WEBUI_PASSWORD_FILE), and/or '
+                    'WEBUI_API_TOKEN (or WEBUI_API_TOKEN_FILE)')
         if self.username and not self.password:
             return 'WEBUI_USERNAME is set but WEBUI_PASSWORD is empty'
         if self.password and not self.username:
@@ -196,3 +276,25 @@ def security_headers():
         'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'same-origin',
     }
+
+
+def _main(argv):
+    """``check-credentials``: used by the container's init script, run as the
+    web UI user, to decide before startup whether the web UI may start.
+    Prints which credentials come from files and why it must not start;
+    never a value. Exit status 0 = may start, 1 = must not."""
+    if argv[1:] != ['check-credentials']:
+        sys.stderr.write('usage: webui_security.py check-credentials\n')
+        return 2
+    config = Config()
+    for note in config.notes:
+        print(note)
+    error = config.startup_error()
+    if error:
+        print(f'ERROR: {error}')
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(_main(sys.argv))
