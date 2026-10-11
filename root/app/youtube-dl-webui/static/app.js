@@ -90,9 +90,10 @@
     return node;
   }
 
-  function link(text, href, cls) {
+  function link(text, href, cls, key) {
     var a = el('a', cls, text);
     a.href = href;
+    if (key) { a.dataset.key = key; }   // keeps the focus across re-renders
     return a;
   }
 
@@ -441,11 +442,17 @@
     if (a === 'running' && b !== 'running') { announce('Scheduled run finished.'); }
     var active = {};
     ((prev.jobs || {}).running || []).concat((prev.jobs || {}).queued || []).forEach(function (j) { active[j.id] = true; });
+    // One announcement for all jobs that ended since the last update
+    // (each announce() replaces the previous one), failures first.
+    var failed = [];
+    var other = [];
     ((next.jobs || {}).finished || []).forEach(function (j) {
       if (active[j.id]) {
-        announce('Download ' + (STATE_TEXT[j.state] || 'ended').toLowerCase() + ': ' + (j.title || j.url || ''));
+        var text = 'Download ' + (STATE_TEXT[j.state] || 'ended').toLowerCase() + ': ' + (j.title || j.url || '') + '.';
+        (j.state === 'failed' || j.state === 'partial' ? failed : other).push(text);
       }
     });
+    if (failed.length || other.length) { announce(failed.concat(other).join(' ')); }
   }
 
   // ---- Rendering ------------------------------------------------------------
@@ -459,6 +466,9 @@
     if (!node) { return; }
     var sig = JSON.stringify(data) + '|' + Math.floor(nowS() / 60);
     if (lastSig[name] === sig) { return; }
+    // Replacing the node under a finger or mouse between pointerdown and
+    // pointerup swallows the click: wait until the press is over.
+    if (pressed && node.contains(pressed)) { return; }
     lastSig[name] = sig;
     var focused = document.activeElement;
     var key = focused && node.contains(focused) && focused.dataset ? focused.dataset.key : null;
@@ -467,6 +477,53 @@
       var again = node.querySelector('[data-key="' + cssEscape(key) + '"]');
       if (again) { again.focus(); }
     }
+  }
+
+  var pressed = null;
+  var pressGen = 0;
+  document.addEventListener('pointerdown', function (e) { pressed = e.target; pressGen += 1; }, true);
+  function released() {
+    var gen = pressGen;
+    // After the click that follows pointerup.
+    setTimeout(function () {
+      if (gen === pressGen && pressed) { pressed = null; render(); }
+    }, 350);
+  }
+  document.addEventListener('pointerup', released, true);
+  document.addEventListener('pointercancel', released, true);
+
+  // Running jobs without their live progress: the parts of a section that
+  // only change with it are patched by updateProgress() instead.
+  function steadyJob(job) {
+    if (!job) { return job; }
+    var copy = {};
+    Object.keys(job).forEach(function (k) {
+      if (k !== 'video' && k !== 'item') { copy[k] = job[k]; }
+    });
+    var v = job.video;
+    // Names change per video, not per progress update.
+    copy.video = v ? { id: v.id, title: v.title, channel: v.channel, playlist: v.playlist } : null;
+    return copy;
+  }
+
+  function steadyJobs(jobs) {
+    jobs = jobs || {};
+    return { running: (jobs.running || []).map(steadyJob), queued: jobs.queued, finished: jobs.finished };
+  }
+
+  // Fill the progress boxes of running jobs (bars and labels only, nothing
+  // to click) when their progress changed.
+  var progressSig = {};
+  function updateProgress(root, jobs, draw) {
+    if (!root) { return; }
+    (jobs || []).forEach(function (job) {
+      var box = root.querySelector('[data-progress="' + cssEscape(job.id) + '"]');
+      if (!box) { return; }
+      var sig = JSON.stringify([job.video, job.item]);
+      if (box.dataset.sig === sig) { return; }
+      box.dataset.sig = sig;
+      fill(box, draw(job));
+    });
   }
 
   function cssEscape(text) {
@@ -486,13 +543,16 @@
     section('cards', $('cards'), [s.scheduler, s.current, s.last_run, s.counts, s.pending, s.disk, s.cookies],
       renderCards);
     section('sched', $('sched'), [s.scheduler, s.current, s.last_run], renderSched);
-    section('manual', $('manual'), [s.jobs, s.scheduler.state], renderManual);
+    section('manual', $('manual'), [steadyJobs(s.jobs), s.scheduler.state], renderManual);
+    updateProgress($('manual'), (s.jobs || {}).running, manualProgress);
     section('attention', $('attention'), s.problems, renderAttention);
     section('recent', $('recent-list'), s.recent, renderRecent);
     section('channels', $('channels-rows'), s.channels, renderChannels);
     section('runs', $('runs-rows'), s.runs, renderRuns);
-    section('job', $('job'), [findJob(s, JOB_ID), s.scheduler.state], renderJob);
-    section('log-sources', $('log-source'), s.jobs, renderLogSources);
+    var job = findJob(s, JOB_ID);
+    section('job', $('job'), [steadyJob(job), s.scheduler.state], renderJob);
+    updateProgress($('job'), job ? [job] : [], jobProgress);
+    section('log-sources', $('log-source'), logSourceList(s.jobs), renderLogSources);
     var version = $('footer-version');
     if (version) {
       version.textContent = 'youtube-dl' + (s.scheduler.ytdlp ? ' · yt-dlp ' + s.scheduler.ytdlp : '');
@@ -559,7 +619,7 @@
       var c = s.cookies || {};
       if (c.bot_checks_24h > 0 && PAGE === 'dashboard') {
         list.push({ tone: 'warn', text: 'YouTube bot check seen ' + c.bot_checks_24h +
-          '× today. Downloads may fail until /config/cookies.txt is refreshed.', href: '#attention', link: 'Show problems' });
+          '× in the last 24 h. Downloads may fail until /config/cookies.txt is refreshed.', href: '#attention', link: 'Show problems' });
       }
       if (s.disk && s.disk.low) {
         list.push({ tone: 'warn', text: 'Disk space is low: ' + bytes(s.disk.free) + ' free under /downloads.' });
@@ -721,7 +781,7 @@
     var now = nowS();
     if (c.bot_checks_24h > 0) {
       o.value = 'Bot check'; o.valueTone = 'err'; o.border = 'err';
-      o.sub = c.bot_checks_24h + '× today · refresh cookies.txt';
+      o.sub = c.bot_checks_24h + '× in 24 h · refresh cookies.txt';
     } else if (!c.present) {
       o.value = 'None'; o.valueTone = 'idle'; o.sub = 'no cookies.txt in /config';
     } else if (c.readable === false) {
@@ -901,6 +961,28 @@
     return b;
   }
 
+  function progressBox(job, draw) {
+    var box = el('div', 'job-progress');
+    box.dataset.progress = job.id;
+    // The live job (status), not the copy without progress the section got.
+    var live = findJob(status, job.id) || job;
+    box.dataset.sig = JSON.stringify([live.video, live.item]);
+    return add(box, draw(live));
+  }
+
+  function manualProgress(job) {
+    return [itemBar(job), videoBar(job.video, 'Manual download')];
+  }
+
+  function jobProgress(job) {
+    var v = job.video;
+    var now = null;
+    if (v && v.title && job.title && v.title !== job.title) {
+      now = add(el('div', 'small'), el('span', 'muted', 'Now: '), bdi(v.title));
+    }
+    return [now, itemBar(job), videoBar(v, 'Current video', true)];
+  }
+
   function renderManual(node) {
     var s = status;
     var jobs = s.jobs || {};
@@ -910,13 +992,12 @@
     var parts = [add(el('div', 'panel-head'), el('span', 'panel-title', 'Manual downloads'),
       el('span', 'muted small', PARALLEL + ' at a time · up to ' + MAX_QUEUED + ' waiting'))];
     running.forEach(function (job) {
-      var title = link('', jobHref(job.id), 'job-title clamp-2');
+      var title = link('', jobHref(job.id), 'job-title clamp-2', 'title:' + job.id);
       add(title, bdi(jobName(job)));
       parts.push(add(el('div', 'job-box'),
         add(el('div', 'row'), srcChip(job), title),
-        itemBar(job),
-        videoBar(job.video, 'Manual download'),
-        add(el('div', 'row'), cancelButton(job), link('Log', jobHref(job.id), 'btn btn-s'))));
+        progressBox(job, manualProgress),
+        add(el('div', 'row'), cancelButton(job), link('Log', jobHref(job.id), 'btn btn-s', 'log:' + job.id))));
     });
     if (running.length && s.scheduler.state === 'running') {
       parts.push(add(el('div', 'info-line'), icon('info'),
@@ -952,7 +1033,7 @@
           title,
           timeNode(job.ended, meta.filter(Boolean).join(' · '), 'muted small'),
           act ? button(act.text, 'btn-s', act.action, { id: job.id }) : null,
-          link('Log', jobHref(job.id), 'btn-link'));
+          link('Log', jobHref(job.id), 'btn-link', 'log:' + job.id));
       })));
     }
     if (!running.length && !queued.length && !finished.length) {
@@ -1126,11 +1207,7 @@
           job.url ? add(el('div', 'mono muted'), bdi(job.url)) : null))
     ];
     if (job.state === 'running') {
-      if (v && v.title && job.title && v.title !== job.title) {
-        parts.push(add(el('div', 'small'), el('span', 'muted', 'Now: '), bdi(v.title)));
-      }
-      parts.push(itemBar(job));
-      parts.push(videoBar(v, 'Current video', true));
+      parts.push(progressBox(job, jobProgress));
     } else if (job.state === 'queued') {
       parts.push(el('p', null, 'Waiting in the queue: position ' + job.position + '.'));
     } else {
@@ -1151,10 +1228,11 @@
     }
     var act = retryAction(job);
     if (act) { add(actions, button(act.text, 'btn-primary', act.action, { id: job.id })); }
-    if (job.state === 'done' || job.state === 'partial') {
+    if (job.state === 'partial') {   // 'done' already got Re-download
       add(actions, button('Re-download', '', 'redownload', { id: job.id }));
     }
-    add(actions, link('Jump to log', '#log', 'btn'), link('Back to dashboard', BASE + '/', 'btn'));
+    add(actions, link('Jump to log', '#log', 'btn', 'jump-log'),
+      link('Back to dashboard', BASE + '/', 'btn', 'back'));
     parts.push(actions);
     fill(node, parts);
     var log = $('log-title');
@@ -1321,7 +1399,8 @@
   var logFollow = $('log-follow');
   var logNote = $('log-note');
   var logState = {
-    source: JOB_ID ? 'job:' + JOB_ID : 'run', offset: -1, gen: 0, timer: null, count: 0, busy: false
+    source: JOB_ID ? 'job:' + JOB_ID : 'run', offset: -1, gen: 0, timer: null, count: 0, busy: false,
+    inFlight: null
   };
 
   function logPath(source) {
@@ -1364,6 +1443,9 @@
   function scheduleLog(ms) {
     if (!logBody) { return; }
     clearTimeout(logState.timer);
+    // A request of this source is under way: its answer schedules the
+    // next one (a second chain would append the same lines twice).
+    if (logState.inFlight === logState.gen) { return; }
     if (!logDetails || !logDetails.open || document.hidden || session.expired) { return; }
     logState.timer = setTimeout(function () { pollLog(0); }, ms);
   }
@@ -1371,6 +1453,7 @@
   function pollLog(round) {
     var gen = logState.gen;
     var source = logState.source;
+    logState.inFlight = gen;
     var url = BASE + '/api' + logPath(source) + '?since=' + logState.offset;
     fetch(url, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' })
       .then(function (r) {
@@ -1380,6 +1463,7 @@
       })
       .then(function (d) {
         if (gen !== logState.gen) { return; }
+        logState.inFlight = null;
         appendLog(typeof d.text === 'string' ? d.text : '', d.reset === true);
         if (isNum(d.offset)) { logState.offset = d.offset; }
         if (d.more && round < 8) {
@@ -1389,7 +1473,7 @@
         }
       })
       .catch(function () {
-        if (gen === logState.gen) { scheduleLog(SLOW); }
+        if (gen === logState.gen) { logState.inFlight = null; scheduleLog(SLOW); }
       });
   }
 
@@ -1419,7 +1503,9 @@
     logDetails.scrollIntoView({ block: 'start' });
   }
 
-  function renderLogSources(node, jobs) {
+  // The options only (no progress), so the <select> is rebuilt only when
+  // jobs come or go.
+  function logSourceList(jobs) {
     var list = [{ value: 'run', text: 'Current run' }];
     var seen = {};
     if (JOB_ID) {
@@ -1433,6 +1519,11 @@
       var name = jobName(j);
       list.push({ value: 'job:' + j.id, text: 'Job: ' + (name.length > 48 ? name.slice(0, 47) + '…' : name) });
     });
+    return list;
+  }
+
+  function renderLogSources(node, list) {
+    list = list.slice();
     if (!list.some(function (o) { return o.value === logState.source; })) {
       list.push({ value: logState.source, text: 'Job: earlier download' });
     }
