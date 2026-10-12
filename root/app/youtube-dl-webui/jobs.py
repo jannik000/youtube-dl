@@ -879,10 +879,12 @@ class JobManager:
             if (state == 'done' and not result['new'] and not result['failed']
                     and result.get('filtered')):
                 # e.g. a live stream or premiere under args.conf's default
-                # --match-filter '!is_live': nothing was downloaded.
+                # --match-filter '!is_live & availability!=subscriber_only':
+                # nothing was downloaded.
                 state = 'failed'
                 failure = ('Nothing downloaded: skipped by --match-filter in '
-                           'args.conf (a live stream or premiere?).')
+                           'args.conf (a live stream, premiere or '
+                           'members-only video?).')
         elif se.only_skipped(result['failed'], result['errors']):
             # yt-dlp exits 1 for members-only videos: skipped, not failed.
             state = 'done' if result['new'] else 'skipped'

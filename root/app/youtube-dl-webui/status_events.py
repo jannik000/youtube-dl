@@ -92,7 +92,11 @@ YOUTUBE_WATCH = 'https://www.youtube.com/watch?v='
 
 # Layout of the per-channel rows in run_end.ch.
 CHANNEL_ROW = ('idx', 'new', 'skipped', 'failed', 'filtered', 'rc', 'secs',
-               'ts', 'url', 'members')
+               'ts', 'url', 'members', 'name')
+
+# A channel's uploads come as playlists named '<channel> - Videos' etc.
+_TAB_SUFFIX_RE = re.compile(
+    r' - (?:Videos|Shorts|Live|Streams|Podcasts|Releases|Playlists|Courses)$')
 
 
 def new_id():
@@ -584,6 +588,7 @@ class Entry:
         self.item = None         # 'Downloading item i of n'
         self.n_items = None
         self.playlist = ''
+        self.title = ''          # first playlist of the entry: the channel
         self.progress = None     # last progress JSON of this entry
         self.phase = ''
         self.phase_id = None     # id of the video the phase belongs to
@@ -711,6 +716,8 @@ class LogParser:
         match = _PLAYLIST_START_RE.match(line)
         if match:
             entry.playlist = clean_text(match.group('t'))
+            if not entry.title:
+                entry.title = _TAB_SUFFIX_RE.sub('', entry.playlist)[:120]
             return
         if _PLAYLIST_END_RE.match(line):
             entry.open = None
@@ -923,7 +930,7 @@ class LogParser:
                 rows.append([index, result['new'], result['skipped'],
                              result['failed'], result['filtered'], entry.rc,
                              entry.secs, entry.ts_end, entry.url,
-                             result['members']])
+                             result['members'], entry.title])
         rows.sort(key=lambda row: row[0])
         return {'sum': totals, 'ch': rows, 'err': errors[:MAX_ERRORS],
                 'err_total': len(errors)}

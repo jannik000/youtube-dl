@@ -353,7 +353,8 @@ def _row(row):
     return {'idx': idx, 'new': _count(row[1]), 'skipped': _count(row[2]),
             'failed': _count(row[3]), 'filtered': _count(row[4]),
             'rc': _int(row[5]), 'secs': _ts(row[6]), 'ts': _ts(row[7]),
-            'url': clean_url(row[8]), 'members': _count(row[9])}
+            'url': clean_url(row[8]), 'members': _count(row[9]),
+            'name': clean(row[10], 120)}
 
 
 def _error(err):
@@ -551,8 +552,11 @@ class EventLog:
                     'last': None}
             self.channels.move_to_end(url)
             stats['last_checked'] = checked
-            if names.get(row['idx']):
-                stats['name'] = names[row['idx']]
+            # The name from the channel's videos, else its playlist title
+            # ('Code Bullet' from 'Downloading playlist: Code Bullet - Videos'),
+            # which every pass has, even when nothing is new.
+            if names.get(row['idx']) or row['name']:
+                stats['name'] = names.get(row['idx']) or row['name']
             if row['new']:
                 stats['last_new'] = checked
             errors = [e for e in record['err'] if e['idx'] == row['idx']]
@@ -1204,8 +1208,14 @@ class Dashboard:
         with self.lock:
             self._refresh(self.clock())
             record = self.events.newest_run()
-            return ((record['nonce'] if record else None),
-                    self.events.channel_names())
+            names = self.events.channel_names()
+            parser = self.pass_log.parser
+            if parser is not None and record is not None \
+                    and self.pass_log.run == record['id']:
+                for index, entry in parser.entries.items():
+                    if index is not None and entry.title:
+                        names.setdefault(index, clean(entry.title, 120))
+            return (record['nonce'] if record else None), names
 
     def channel_info(self):
         """{url: {'name', 'status', 'last_new', 'last_checked'}} of the
@@ -1392,7 +1402,7 @@ class Dashboard:
             shown = parser.entries.get(done_idx)
         if shown is not None:
             name = (self.events.run_names.get(shown.index)
-                    or clean(shown.playlist, 120))
+                    or clean(shown.title or shown.playlist, 120))
             channel = {'index': shown.index, 'total': total,
                        'url': clean_url(shown.url), 'name': name}
         if entry is not None:

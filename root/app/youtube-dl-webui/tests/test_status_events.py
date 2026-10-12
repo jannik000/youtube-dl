@@ -380,7 +380,7 @@ def test_outcome_comes_from_events_and_errors_attach_to_the_open_video():
     assert s['err'] == [{'idx': 1, 'id': 'b', 'kind': 'unavailable',
                          'msg': 'unable to download video data: HTTP Error 404: Not Found',
                          'title': 'B'}]
-    assert s['ch'] == [[1, 2, 0, 1, 0, 1, 3, None, 'https://x/', 0]]
+    assert s['ch'] == [[1, 2, 0, 1, 0, 1, 3, None, 'https://x/', 0, '']]
 
 
 @pytest.mark.parametrize('msg', [
@@ -461,6 +461,26 @@ def test_members_only_warning_without_an_id(with_event):
     assert s['sum']['members'] == 1 and s['sum']['failed'] == 1
     # The warning before the first item belongs to no video.
     assert 'cookies' not in str(s['err']).lower()
+
+
+def test_channel_title_from_the_first_playlist():
+    # Even with every video archived, yt-dlp names the channel's playlists.
+    p = se.LogParser(NONCE, run=RUN)
+    for line in [
+            _marker('start', 1, total=2, url='https://youtube.com/@codebullet'),
+            '[download] Downloading playlist: Code Bullet',
+            '[download] Downloading item 1 of 2',
+            '[download] Downloading playlist: Code Bullet - Shorts',
+            '[download] aaaaaaaaaaa: Shorts video has already been recorded in the archive',
+            '[download] Downloading playlist: Code Bullet - Videos',
+            _marker('end', 1, rc=0, secs=3),
+            _marker('start', 2, total=2, url='https://youtube.com/@nightshift'),
+            '[download] Downloading playlist: Nightshift \u2013 Kurzgesagt After Dark - Videos',
+            _marker('end', 2, rc=0, secs=3)]:
+        p.feed(line)
+    p.finish()
+    assert [row[10] for row in p.summary()['ch']] == [
+        'Code Bullet', 'Nightshift \u2013 Kurzgesagt After Dark']
 
 
 def test_forged_lines_without_the_nonce_are_ignored():
@@ -579,14 +599,14 @@ def test_pass_fixture():
     s = p.summary()
     assert p.pass_ended and p.total == 5
     assert _rows(s) == [
-        [1, 1, 1, 3, 1, 1, 'fakelist:x', 0],
-        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0],
+        [1, 1, 1, 3, 1, 1, 'fakelist:x', 0, 'Fake Channel'],
+        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0, 'Mixed Page'],
         # The page title forges an archive-skip line and an ERROR line three
         # times (cosmetic, 'from log'); its forged channel marker without the
         # nonce changes nothing.
-        [3, 2, 3, 1, 0, 0, 'http://127.0.0.1:8765/forged.html', 0],
-        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0],
-        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0],
+        [3, 2, 3, 1, 0, 0, 'http://127.0.0.1:8765/forged.html', 0, 'Evil'],
+        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0, ''],
+        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0, ''],
     ]
     assert s['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1, 'members': 0}
     assert _errors(s) == EXPECTED_ERRORS + [
@@ -607,11 +627,11 @@ def test_pass_fixture_with_user_quiet():
     # and postprocess lines still tell which video an error belongs to.
     s = _parse_pass('pass_quiet').summary()
     assert _rows(s) == [
-        [1, 1, 0, 3, 0, 1, 'fakelist:x', 0],
-        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0],
-        [3, 2, 0, 0, 0, 0, 'http://127.0.0.1:8765/forged.html', 0],
-        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0],
-        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0],
+        [1, 1, 0, 3, 0, 1, 'fakelist:x', 0, ''],
+        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0, ''],
+        [3, 2, 0, 0, 0, 0, 'http://127.0.0.1:8765/forged.html', 0, ''],
+        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0, ''],
+        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0, ''],
     ]
     assert _errors(s) == EXPECTED_ERRORS + [(4, None, 'other'), (5, None, 'other')]
 
