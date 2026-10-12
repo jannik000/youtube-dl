@@ -233,6 +233,9 @@ on a phone, a tablet and a desktop, in light and dark mode.
   dashboard counts them as *members-only* (a lock chip), keeps the pass and
   the channel *ok* when nothing else failed, leaves them out of *Needs
   attention*, and a manual download of one ends as *Skipped*.
+  The default `args.conf` already skips them while listing a channel
+  (`availability!=subscriber_only`, counted as *filtered*); the dashboard
+  handling covers the ones yt-dlp only recognises when it fetches them.
 * **Recently downloaded**, **Channels** (per `channels.txt` line: last
   checked, last new video, last result; a channel without a new video for
   90 days is marked stale) and **Recent runs** (the last 10 passes).
@@ -293,8 +296,9 @@ into a queue:
   `cookies.txt` (deleted when it ends), because yt-dlp rewrites its cookie
   file on exit and parallel runs would wipe each other's cookies; only the
   scheduled pass updates `/config/cookies.txt`.
-* A download where `args.conf`'s `--match-filter` (by default `'!is_live'`)
-  skipped everything ends as *failed* with that reason, not as finished.
+* A download where `args.conf`'s `--match-filter` (by default
+  `'!is_live & availability!=subscriber_only'`) skipped everything ends as
+  *failed* with that reason, not as finished.
 * **Re-download anyway** (checkbox in the form, *Re-download* on a finished
   download) runs yt-dlp without any archive (`--no-download-archive`), so
   the video is fetched again and not recorded in the archive.
@@ -458,10 +462,10 @@ runtime.
     https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q | --output '/downloads/named/%(title)s.%(ext)s'
 
     # Use regex to only download videos matching words
-    https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q | --no-match-filter --match-filter '!is_live & title~=(?i)words.*to.*match'
+    https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q | --no-match-filter --match-filter '!is_live & availability!=subscriber_only & title~=(?i)words.*to.*match'
 
     # Use regex to only download videos not matching words
-    https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q | --no-match-filter --match-filter '!is_live & title!~=(?i)words.*to.*exclude'
+    https://www.youtube.com/channel/UC0vaVaSyV14uvJ4hEZDOl0Q | --no-match-filter --match-filter '!is_live & availability!=subscriber_only & title!~=(?i)words.*to.*exclude'
 
     # Download a whole playlist, also disable reverse download order
     https://www.youtube.com/playlist?list=D9sLB5EVaCarZ7lbpQfGch3jJuYCRt | --playlist-end '-1' --no-playlist-reverse
@@ -526,7 +530,7 @@ runtime.
     * `--output '/downloads/%(uploader)s/%(title)s.%(ext)s'`, makes youtube-dl create separate folders for each channel and use the video title for the filename.
     * `--playlist-end '16'`, makes youtube-dl only download the latest 16 videos, per channel.
     * `--playlist-reverse`, makes youtube-dl download channel videos in the order they were uploaded.
-    * `--match-filter '!is_live'`, makes youtube-dl ignore live streams.
+    * `--match-filter '!is_live & availability!=subscriber_only'`, makes youtube-dl ignore live streams and members-only videos. yt-dlp sees the "Members only" badge when it lists a channel, so these videos are skipped before they are fetched (they count as *filtered*, and no thumbnail of them lands in `/downloads`). With a member account's `cookies.txt`, remove ` & availability!=subscriber_only` to download them.
     * `--windows-filenames`, restricts filenames to only Windows allowed characters.
     * `--ignore-no-formats-error`, keeps youtube-dl from crashing when trying to download a video premiere.
     * `--newline`, makes youtube-dl print download progress while a download is in progress.
