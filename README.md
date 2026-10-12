@@ -259,7 +259,7 @@ on a phone, a tablet and a desktop, in light and dark mode.
   dashboard break.
 
 **Without JavaScript** the page says that live status needs JavaScript; the
-download form and the editors still work. Browser navigations get HTML error
+download form, the channel list and the editors still work. Browser navigations get HTML error
 pages (for example the confirmation for *Run now* while a pass runs); API
 clients keep getting JSON.
 
@@ -466,6 +466,15 @@ runtime.
     # Download a whole playlist, also disable reverse download order
     https://www.youtube.com/playlist?list=D9sLB5EVaCarZ7lbpQfGch3jJuYCRt | --playlist-end '-1' --no-playlist-reverse
     ```
+    **In the web UI** (*Edit → Channels*) the file is a list: each channel with its name (once a
+    pass has seen one of its videos), its URL, its ` | ` options and its last result. *Add* takes a
+    channel URL or an `@handle` (stored as `https://www.youtube.com/@handle`) plus optional options
+    for that line, refuses duplicates and validates the options like the text editor does; the ×
+    removes one line, with *Undo* right after. Comments, blank lines and the order of the file stay
+    as they are. Changes apply from the next pass; a running pass is not interrupted. *Edit as
+    text* opens the whole file (saving there restarts the pass). With `WEBUI_READONLY=true` the
+    list is read-only; the API token cannot change it.
+
     Adding with Docker:  
     `docker exec youtube-dl bash -c 'echo "# NAME" >> ./channels.txt'`  
     `docker exec youtube-dl bash -c 'echo "URL" >> ./channels.txt'`

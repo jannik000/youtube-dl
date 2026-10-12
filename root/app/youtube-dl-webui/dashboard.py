@@ -1207,6 +1207,20 @@ class Dashboard:
             return ((record['nonce'] if record else None),
                     self.events.channel_names())
 
+    def channel_info(self):
+        """{url: {'name', 'status', 'last_new', 'last_checked'}} of the
+        channels the passes have seen, for the channel manager."""
+        with self.lock:
+            now = self.clock()
+            self._refresh(now)
+            out = {url: {'name': stats['name'], 'status': None,
+                         'last_new': stats['last_new'],
+                         'last_checked': stats['last_checked']}
+                   for url, stats in self.events.channels.items()}
+            for channel in self._channels(now):
+                out[channel['url']]['status'] = channel['status']
+            return out
+
     def pass_running(self):
         """True while the scheduled pass runs (its run_start has no run_end
         and youtube-dl.sh is alive): 'Run now' then asks first."""

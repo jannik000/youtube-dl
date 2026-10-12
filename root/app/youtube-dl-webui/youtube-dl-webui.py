@@ -3,6 +3,7 @@ import contextlib
 import logging
 import os
 import sys
+import time
 
 import aiofiles
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -13,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pathlib import Path
 
+import channels_file
 import dashboard
 import jobs
 import status_events
@@ -156,11 +158,29 @@ EDIT_PAGES = {
                  'field': 'channels_new', 'action': '/edit/channels/save',
                  'hint': 'One URL per line; "URL | options" adds yt-dlp '
                          'options for that entry. Lines starting with # '
-                         'are comments.'},
+                         'are comments. Saving restarts the scheduled pass.',
+                 'back_href': '/edit/channels',
+                 'back_text': 'Back to channels'},
     'archive': {'heading': 'Archive', 'filename': '/config/archive.txt',
                 'field': 'archive_new', 'action': '/edit/archive/save',
                 'hint': 'Videos listed here ("extractor id" per line) are '
                         'not downloaded again.'},
+}
+
+
+
+def _ago(ts, now):
+    """'today', 'yesterday', '5 days ago' or '' for a Unix time."""
+    if not isinstance(ts, (int, float)) or ts <= 0:
+        return ''
+    days = int(max(0, now - ts) // 86400)
+    return {0: 'today', 1: 'yesterday'}.get(days, f'{days} days ago')
+
+
+# Channel status (dashboard._channels) -> (chip tone, text).
+CHANNEL_STATUS = {
+    'ok': ('tone-ok', 'OK'), 'stale': ('tone-warn', 'No new videos'),
+    'failed': ('tone-err', 'Failed'), 'error': ('tone-err', 'Error'),
 }
 
 _ERROR_TITLES = {
@@ -523,20 +543,143 @@ def create_app():
         return RedirectResponse(url=f'{BASE_PATH}/edit/args',
                                 status_code=status.HTTP_303_SEE_OTHER)
 
+    # The channel manager: channels.txt as a list (add, remove, undo).
+    # Changes apply from the next pass; the running one is left alone.
+    channels_lock = asyncio.Lock()
+    removed = {}   # the last removed line, for Undo: {'line', 'pos'}
+
+    async def read_channels():
+        try:
+            return await _read_file(PATHS.channels_file)
+        except FileNotFoundError:
+            return ''
+
+    async def write_channels(text):
+        async with aiofiles.open(PATHS.channels_file, 'w') as f:
+            await f.write(text)
+
+    async def channels_page(request, error='', form=None, notice='',
+                            status_code=200):
+        text = await read_channels()
+        info = await asyncio.to_thread(dash.channel_info)
+        now = time.time()
+        rows = []
+        for entry in channels_file.entries(text):
+            seen = info.get(entry['url']) or {}
+            tone, label = CHANNEL_STATUS.get(seen.get('status'),
+                                             ('tone-idle', 'Not checked yet'))
+            rows.append(dict(
+                entry, name=seen.get('name') or '',
+                short=dashboard.short_url(entry['url']) or entry['url'],
+                link=(entry['url'] if entry['url'].lower().startswith(
+                    ('http://', 'https://')) else ''),
+                tone=tone, status=label,
+                last_new=_ago(seen.get('last_new'), now),
+                checked=bool(seen.get('last_checked'))))
+        return templates.TemplateResponse(
+            request, 'channels.html',
+            context(request, {
+                'page': 'channels', 'channels': rows,
+                'comments': channels_file.comment_lines(text),
+                'error': error, 'form': form or {}, 'notice': notice,
+                'removed_line': removed.get('line', '')}),
+            status_code=status_code)
+
+    def channels_saved(query=''):
+        return RedirectResponse(url=f'{BASE_PATH}/edit/channels{query}',
+                                status_code=status.HTTP_303_SEE_OTHER)
+
     @app.get('/edit/channels')
     async def edit_channels(request: Request, _=Depends(require_auth)):
-        return edit_page(request, 'channels',
-                         await _read_file(PATHS.channels_file))
+        notice = ''
+        if request.query_params.get('removed') and removed:
+            notice = 'removed'
+        elif request.query_params.get('added'):
+            notice = 'added'
+        return await channels_page(request, notice=notice)
+
+    @app.get('/edit/channels/text')
+    async def edit_channels_text(request: Request, _=Depends(require_auth)):
+        return edit_page(request, 'channels', await read_channels())
+
+    @app.post('/edit/channels/add')
+    async def add_channel(request: Request, auth_kind=Depends(require_auth),
+                          url: str = Form(''), options: str = Form(''),
+                          csrf_token: str = Form('')):
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        require_writable()
+        async with channels_lock:
+            text = await read_channels()
+            try:
+                clean_url = channels_file.normalise_url(url)
+                try:
+                    webui_security.validate_download_url(clean_url, config)
+                except HTTPException as err:
+                    raise channels_file.ChannelError(
+                        'This domain is not in WEBUI_ALLOWED_DOMAINS.'
+                        if err.status_code == 403 else
+                        'Only plain http and https URLs can be added.')
+                new_text = channels_file.add(text, clean_url, options)
+                if not config.allow_unsafe_args:
+                    try:
+                        ytdlp_args.validate_channels(new_text)
+                    except ytdlp_args.ArgsError as err:
+                        raise channels_file.ChannelError(
+                            f'Options refused: {err}'.replace(
+                                f'line {len(new_text.splitlines())}: ', ''))
+            except channels_file.ChannelError as err:
+                return await channels_page(
+                    request, error=str(err),
+                    form={'url': url, 'options': options},
+                    status_code=status.HTTP_400_BAD_REQUEST)
+            await write_channels(new_text)
+            removed.clear()
+        return channels_saved('?added=1')
+
+    @app.post('/edit/channels/remove')
+    async def remove_channel(request: Request,
+                             auth_kind=Depends(require_auth),
+                             line: str = Form(''), csrf_token: str = Form('')):
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        require_writable()
+        async with channels_lock:
+            text = await read_channels()
+            try:
+                new_text, pos = channels_file.remove(text, line.strip())
+            except channels_file.ChannelError as err:
+                return await channels_page(
+                    request, error=str(err),
+                    status_code=status.HTTP_409_CONFLICT)
+            await write_channels(new_text)
+            removed.clear()
+            removed.update(line=line.strip(), pos=pos)
+        return channels_saved('?removed=1')
+
+    @app.post('/edit/channels/undo')
+    async def undo_remove_channel(request: Request,
+                                  auth_kind=Depends(require_auth),
+                                  csrf_token: str = Form('')):
+        webui_security.enforce_csrf(request, config, auth_kind, csrf_token)
+        require_writable()
+        async with channels_lock:
+            if removed:
+                text = await read_channels()
+                await write_channels(channels_file.restore(
+                    text, removed['line'], removed['pos']))
+                removed.clear()
+        return channels_saved()
 
     @app.post('/edit/channels/save')
     async def save_channels(request: Request, auth_kind=Depends(require_auth),
                             channels_new: list = Form(...),
                             csrf_token: str = Form('')):
-        refused = await save_validated(
+        answer = await save_validated(
             request, 'channels', PATHS.channels_file, channels_new,
             ytdlp_args.validate_channels, auth_kind, csrf_token)
-        if refused is not None:
-            return refused
+        if answer is not None:
+            if answer.status_code == status.HTTP_303_SEE_OTHER:
+                removed.clear()   # Undo would put the line into new text
+            return answer
         return RedirectResponse(url=f'{BASE_PATH}/edit/channels',
                                 status_code=status.HTTP_303_SEE_OTHER)
 

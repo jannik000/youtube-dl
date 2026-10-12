@@ -148,7 +148,8 @@ def test_served_pages_follow_the_rules(make_client):
     """The rendered pages too (the rules above are on the sources)."""
     client, _ = make_client()
     pages = ['/', '/download/12345678-1234-4678-9234-567812345678',
-             '/edit/args', '/edit/channels', '/edit/archive']
+             '/edit/args', '/edit/channels', '/edit/channels/text',
+             '/edit/archive']
     for page in pages:
         r = client.get(page, auth=basic())
         assert r.status_code == 200, page

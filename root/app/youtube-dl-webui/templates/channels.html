@@ -1,0 +1,85 @@
+{% extends "layout.html" %}
+{#- The channel manager: channels.txt as a list with add and remove. Plain
+    forms, no JavaScript needed. #}
+{% block title %}Channels · youtube-dl{% endblock %}
+
+{% block content %}
+<a class="back" href="{{ base_path }}/">← Back to dashboard</a>
+<section class="panel channels" aria-labelledby="channels-h">
+  <div class="row row-between">
+    <h1 id="channels-h">Channels <span class="muted num">{{ channels|length }}</span></h1>
+    <a class="btn btn-s" href="{{ base_path }}/edit/channels/text">Edit as text</a>
+  </div>
+  {% if readonly %}
+  <div class="callout tone-warn" role="note">Configuration editing is disabled (WEBUI_READONLY). The list is read-only.</div>
+  {% endif %}
+  {% if error %}
+  <div class="callout tone-err" role="alert"><strong>Not saved:</strong> {{ error }}</div>
+  {% endif %}
+  {% if notice == 'removed' and removed_line %}
+  <form class="callout tone-idle channel-notice" method="post" action="{{ base_path }}/edit/channels/undo">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <span class="grow">Removed <span class="mono">{{ removed_line }}</span>.</span>
+    <button type="submit" class="btn btn-s"{% if readonly %} disabled{% endif %}>Undo</button>
+  </form>
+  {% elif notice == 'added' %}
+  <div class="callout tone-ok" role="status">Added. It is checked in the next pass.</div>
+  {% endif %}
+
+  {% if not readonly %}
+  <form class="channel-add" method="post" action="{{ base_path }}/edit/channels/add">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="dl-row">
+      <label for="channel-url" class="visually-hidden">Channel or playlist URL, or @handle</label>
+      <input id="channel-url" name="url" type="text" inputmode="url" autocapitalize="off"
+             autocomplete="off" spellcheck="false" required maxlength="2048"
+             placeholder="Channel URL or @handle" value="{{ form.url or '' }}">
+      <button type="submit" class="btn btn-primary">
+        <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        Add
+      </button>
+    </div>
+    <details class="channel-options"{% if form.options %} open{% endif %}>
+      <summary class="muted small">Options for this channel (optional)</summary>
+      <label for="channel-options" class="visually-hidden">yt-dlp options for this channel</label>
+      <input id="channel-options" name="options" type="text" autocapitalize="off" autocomplete="off"
+             spellcheck="false" maxlength="4096" placeholder="--playlist-end 10"
+             value="{{ form.options or '' }}">
+      <p class="muted small">yt-dlp options for this channel only, written as "URL | options".</p>
+    </details>
+  </form>
+  {% endif %}
+
+  <div class="list channel-list">
+    {% for c in channels %}
+    <div class="list-row channel-row">
+      <div class="grow stack-tight">
+        <span class="strong"><bdi>{{ c.name or c.short }}</bdi></span>
+        {% if c.link %}<a class="mono muted small" href="{{ c.link }}" rel="noopener noreferrer" target="_blank">{{ c.url }}</a>
+        {% else %}<span class="mono muted small">{{ c.url }}</span>{% endif %}
+        {% if c.options %}<span class="mono small channel-opts" title="yt-dlp options for this channel">| {{ c.options }}</span>{% endif %}
+        <span class="row channel-meta">
+          <span class="chip {{ c.tone }}">{{ c.status }}</span>
+          {% if c.last_new %}<span class="muted small">new video {{ c.last_new }}</span>{% endif %}
+        </span>
+      </div>
+      {% if not readonly %}
+      <form method="post" action="{{ base_path }}/edit/channels/remove">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="line" value="{{ c.line }}">
+        <button type="submit" class="btn btn-icon" aria-label="Remove {{ c.name or c.short }}" title="Remove">
+          <svg class="ic ic-l" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="empty">No channels yet. Add a channel or playlist URL above.</p>
+    {% endfor %}
+  </div>
+  <p class="muted small">
+    Changes apply from the next pass; a running pass is not interrupted.
+    {% if comments %}{{ comments }} comment line{{ '' if comments == 1 else 's' }} in channels.txt {{ 'is' if comments == 1 else 'are' }} kept (see <a href="{{ base_path }}/edit/channels/text">Edit as text</a>).{% endif %}
+  </p>
+</section>
+{% endblock %}
