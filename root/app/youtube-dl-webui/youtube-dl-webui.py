@@ -88,22 +88,22 @@ async def _read_file(path):
 NO_STORE = {'Cache-Control': 'no-store'}
 
 
-async def _log_tail_response(path, nonce=None):
+async def _log_tail_response(path, nonce=None, names=None):
     """Serve the complete lines in the last LOG_TAIL_BYTES of a log file,
     without the dashboard's markers and nonces (dashboard.scrub_log_line)."""
     try:
         text = await asyncio.to_thread(dashboard.read_log_tail, path,
-                                       LOG_TAIL_BYTES, nonce)
+                                       LOG_TAIL_BYTES, nonce, names)
     except OSError:
         return PlainTextResponse('error reading log', status_code=500)
     return PlainTextResponse(text, headers=NO_STORE)
 
 
-async def _log_since_response(path, since, nonce=None):
+async def _log_since_response(path, since, nonce=None, names=None):
     """JSON {offset, reset, more, text} for the log panel."""
     try:
         data = await asyncio.to_thread(dashboard.read_log_since, path, since,
-                                       nonce)
+                                       nonce, names=names)
     except OSError:
         return JSONResponse({'detail': 'error reading log'}, status_code=500)
     return JSONResponse(data, headers=NO_STORE)
@@ -463,8 +463,9 @@ def create_app():
 
     @app.get('/api/log/youtube-dl')
     async def api_youtube_dl_log(since: int = -1, _=Depends(require_auth)):
-        nonce = await asyncio.to_thread(dash.log_nonce)
-        return await _log_since_response(PATHS.youtube_dl_log, since, nonce)
+        nonce, names = await asyncio.to_thread(dash.log_context)
+        return await _log_since_response(PATHS.youtube_dl_log, since, nonce,
+                                         names)
 
     @app.get('/api/log/download/{download_id}')
     async def api_download_log(download_id: str, since: int = -1,
@@ -475,8 +476,8 @@ def create_app():
 
     @app.get('/log/youtube-dl', response_class=PlainTextResponse)
     async def youtube_dl_log(_=Depends(require_auth)):
-        nonce = await asyncio.to_thread(dash.log_nonce)
-        return await _log_tail_response(PATHS.youtube_dl_log, nonce)
+        nonce, names = await asyncio.to_thread(dash.log_context)
+        return await _log_tail_response(PATHS.youtube_dl_log, nonce, names)
 
     @app.get('/log/download/{download_id}', response_class=PlainTextResponse)
     async def download_log(download_id: str, _=Depends(require_auth)):

@@ -236,7 +236,9 @@ on a phone, a tablet and a desktop, in light and dark mode.
 * **Recently downloaded**, **Channels** (per `channels.txt` line: last
   checked, last new video, last result; a channel without a new video for
   90 days is marked stale) and **Recent runs** (the last 10 passes).
-* **Log:** the pass log or a download's log, tailed live, with filters
+* **Log:** the pass log (each channel starts with a "Channel *i* of *n*:
+  *name* (*URL*)" line; the name is known once a pass has seen one of its
+  videos) or a download's log, tailed live, with filters
   (errors and warnings, hide archive skips), follow, copy and download.
 
 **Honest limits**

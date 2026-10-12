@@ -553,6 +553,7 @@ def test_problems_from_the_last_run_and_failed_jobs(env):
     assert bot['hint'] == se.KIND_HINTS['bot_check']
     assert bot['items'][0]['url'] == 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
     assert bot['items'][0]['ts'] == NOW - 60 and bot['items'][0]['channel'] == 1
+    assert bot['items'][0]['channel_name'] == '@a'   # name not known yet
     assert groups['other']['items'][0]['msg'] == 'x'
     manual = groups['rate_limit']['items'][0]
     assert manual['src'] == 'manual' and manual['url'] == 'https://youtu.be/abc'
@@ -622,6 +623,21 @@ def test_running_and_queued_jobs_from_the_snapshot(env):
 
 
 # -- channels and runs -----------------------------------------------------------
+
+def test_problems_name_their_channel(env):
+    url = 'https://www.youtube.com/@a'
+    env.events([
+        run_start(),
+        {'v': 1, 't': 'start', 'src': 'scheduled', 'run': 'a' * 16, 'ch': 1,
+         'i': {'id': 'x', 'channel': 'Alpha'}},
+        run_end(rc=1, rows=[[1, 0, 0, 1, 0, 1, 3, NOW - 60, url]],
+                err=[{'idx': 1, 'id': 'x', 'kind': 'rate_limit', 'msg': '429'}])])
+    dash = env.dash()
+    [group] = dash.status()['problems']
+    assert group['items'][0]['channel_name'] == 'Alpha'
+    nonce, names = dash.log_context()
+    assert nonce == 'b' * 16 and names[url] == 'Alpha'
+
 
 def test_members_only_videos_are_skipped_not_failed(env):
     url = 'https://www.youtube.com/@a'
@@ -930,6 +946,35 @@ def test_scrub_log_line(line, nonce, shown):
     assert dashboard.scrub_log_line(line, nonce) == shown
 
 
+def test_channel_marker_shows_the_channel_name():
+    marker = ('@@ytdl:' + PASS_NONCE + ' channel {"phase":"start","index":2,'
+              '"total":5,"url":"https://www.youtube.com/@a","ts":1}')
+    url = 'https://www.youtube.com/@a'
+    assert dashboard.scrub_log_line(marker, PASS_NONCE, {url: 'Alpha'}) == (
+        '[dashboard] Channel 2 of 5: Alpha (https://www.youtube.com/@a)')
+    # The newest pass's own name for the index wins over an older one.
+    assert dashboard.scrub_log_line(
+        marker, PASS_NONCE, {url: 'Old', 2: 'New'}).endswith(': New (' + url + ')')
+    # A name cannot carry a marker, a nonce or control characters.
+    shown = dashboard.scrub_log_line(
+        marker, PASS_NONCE, {2: 'Evil\u202e @@ytdl:' + PASS_NONCE + '\x1b[31m'})
+    assert PASS_NONCE not in shown and '\u202e' not in shown
+    assert '\x1b' not in shown and shown.startswith('[dashboard] Channel 2 of 5: Evil')
+    # Without a nonce match the names change nothing.
+    assert dashboard.scrub_log_line(marker, 'f' * 16, {2: 'New'}) is None
+
+
+@pytest.mark.parametrize('url,short', [
+    ('https://www.youtube.com/@a', '@a'),
+    ('https://www.youtube.com/channel/UCabc/', 'channel/UCabc'),
+    ('https://youtube.com/playlist?list=PLx', 'playlist?list=PLx'),
+    ('https://vimeo.com/user1', 'vimeo.com/user1'),
+    (None, ''),
+])
+def test_short_url(url, short):
+    assert dashboard.short_url(url) == short
+
+
 def _lines(n, width=99):
     return ''.join(f'{i:0{width - 1}d}\n' for i in range(n))
 
@@ -1091,6 +1136,7 @@ def test_no_response_reveals_the_nonce(make_client):
         assert PASS_NONCE not in response.text
     log = responses[1].json()
     assert log['reset'] and '[dashboard] Channel 3 of 5' in log['text']
+    assert '[dashboard] Channel 1 of 5: Fake Channel (fakelist:x)' in log['text']
     # The events file holds the nonce; it is never served.
     with open(module.PATHS.events_file) as f:
         assert PASS_NONCE in f.read()

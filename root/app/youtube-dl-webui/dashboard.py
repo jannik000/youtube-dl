@@ -384,6 +384,16 @@ def _channel_name(info):
     return ''
 
 
+def short_url(url):
+    """A short form of a channels.txt URL for when the channel's name is not
+    known yet: '@handle', 'channel/UC...' or 'playlist?list=...' for
+    YouTube, else the URL without its scheme."""
+    url = clean_url(url) or ''
+    short = re.sub(r'^[a-z][a-z0-9+.-]*://', '', url, flags=re.I)
+    short = re.sub(r'^(?:www\.|m\.)?youtube\.com/', '', short, flags=re.I)
+    return clean(short.rstrip('/'), 120)
+
+
 class EventLog:
     """Bounded state built from the event file."""
 
@@ -404,6 +414,24 @@ class EventLog:
 
     def newest_run(self):
         return self.runs.get(self.newest) if self.newest else None
+
+    def channel_names(self):
+        """{url: name} of the known channels, plus {index: name} of the
+        newest run's channels (names of its first videos), for the log."""
+        names = {url: stats['name'] for url, stats in self.channels.items()
+                 if stats['name']}
+        names.update(self.run_names)
+        return names
+
+    def channel_name(self, url, run=None, index=None):
+        """Name of a channel by its URL, or by its index in the newest run;
+        '' if unknown."""
+        stats = self.channels.get(url) if url else None
+        if stats and stats['name']:
+            return stats['name']
+        if run is not None and run == self.newest:
+            return self.run_names.get(index, '')
+        return ''
 
     def refresh(self, now=None):
         """Read new events; returns them (parsed, valid ones only)."""
@@ -974,7 +1002,7 @@ _LOG_UNSAFE_RE = re.compile(
     '\u2066-\u2069\ud800-\udfff]')
 
 
-def scrub_log_line(line, nonce=None):
+def scrub_log_line(line, nonce=None, names=None):
     """A pass or job log line as shown in the browser, or None to leave it
     out.
 
@@ -982,7 +1010,9 @@ def scrub_log_line(line, nonce=None):
     progress lines (keeping yt-dlp's human text), the postprocess progress
     lines and the "[info] Writing '{"v":1,...' lines of the events. A
     channel start marker with the current ``nonce`` becomes a readable
-    "[dashboard] Channel i of n" line; other markers are left out. Any other
+    "[dashboard] Channel i of n: <name> (<url>)" line (the name from
+    ``names``: {url: name} and {index: name} of the newest pass, see
+    Dashboard.log_context()); other markers are left out. Any other
     ``@@ytdl:<hex>`` (e.g. in --verbose's command-line dump) is masked, so no
     nonce ever reaches the browser. Also strips ANSI codes, control and
     bidirectional-override characters, and keeps only the last part of a
@@ -1006,7 +1036,14 @@ def scrub_log_line(line, nonce=None):
                 if _int(data.get('total')) is not None:
                     text += f' of {data["total"]}'
                 url = clean_url(data.get('url'))
-                return text + (f': {url}' if url else '')
+                name = ''
+                if names:
+                    name = (names.get(_int(data['index']))
+                            or (names.get(url) if url else '') or '')
+                name = _SENTINEL_RE.sub('@@ytdl:…', clean(name, 120))
+                if name and url:
+                    return f'{text}: {name} ({url})'
+                return text + (f': {name or url}' if name or url else '')
         return None
     if _WRITING_RE.match(line) or _POSTPROCESS_RE.match(line):
         return None
@@ -1015,8 +1052,8 @@ def scrub_log_line(line, nonce=None):
     return _LOG_UNSAFE_RE.sub('', line.replace('\t', '    '))
 
 
-def _scrub(lines, nonce):
-    out = [scrub_log_line(line, nonce) for line in lines]
+def _scrub(lines, nonce, names=None):
+    out = [scrub_log_line(line, nonce, names) for line in lines]
     text = '\n'.join(line for line in out if line is not None)
     return text + '\n' if text else ''
 
@@ -1052,7 +1089,8 @@ def _skip_line(fd, pos, size):
     return pos + scanned, False
 
 
-def read_log_since(path, since=None, nonce=None, limit=LOG_CHUNK_BYTES):
+def read_log_since(path, since=None, nonce=None, limit=LOG_CHUNK_BYTES,
+                   names=None):
     """The part of a log after byte ``since``: {offset, reset, more, text}.
 
     * ``since`` None or negative, or beyond the end (the log was truncated):
@@ -1093,14 +1131,14 @@ def read_log_since(path, since=None, nonce=None, limit=LOG_CHUNK_BYTES):
             used = end - start
         offset = start + used
         return {'offset': offset, 'reset': reset, 'more': offset < size,
-                'text': _scrub(lines, nonce)}
+                'text': _scrub(lines, nonce, names)}
     finally:
         os.close(fd)
 
 
-def read_log_tail(path, limit, nonce=None):
+def read_log_tail(path, limit, nonce=None, names=None):
     """The last ``limit`` bytes of a log as scrubbed text (complete lines)."""
-    return read_log_since(path, None, nonce, limit)['text']
+    return read_log_since(path, None, nonce, limit, names)['text']
 
 
 # --------------------------------------------------------------------------
@@ -1159,13 +1197,15 @@ class Dashboard:
                 if e.get('t') in ('start', 'end')
                 and e.get('src') == 'scheduled' and e.get('run') == run]
 
-    def log_nonce(self):
-        """Nonce of the newest pass (to recognise its markers in the log);
-        stays on the server."""
+    def log_context(self):
+        """(nonce, channel names) of the newest pass for read_log_since() on
+        the pass log: the nonce recognises its markers and stays on the
+        server."""
         with self.lock:
             self._refresh(self.clock())
             record = self.events.newest_run()
-            return record['nonce'] if record else None
+            return ((record['nonce'] if record else None),
+                    self.events.channel_names())
 
     def pass_running(self):
         """True while the scheduled pass runs (its run_start has no run_end
@@ -1325,7 +1365,8 @@ class Dashboard:
                     totals[key] += result[key]
                 ts = item.ts_end or item.ts_start or record['ts']
                 for err in result['errors']:
-                    errors.append(dict(err, ts=ts, src='scheduled'))
+                    errors.append(dict(err, ts=ts, src='scheduled',
+                                       ch_url=item.url))
                 if item.ended:
                     done_idx = max(done_idx, index)
         channel = video = item_pos = None
@@ -1578,7 +1619,8 @@ class Dashboard:
             for err in record['err']:
                 row = rows.get(err['idx']) or {}
                 items.append(dict(err, src='scheduled', run=record['id'],
-                                  ts=row.get('ts') or record['end_ts']))
+                                  ts=row.get('ts') or record['end_ts'],
+                                  ch_url=row.get('url')))
         for job in jobs_view.get('finished', []):
             error = job.get('error')
             if job.get('state') in ('failed', 'partial') and error:
@@ -1609,6 +1651,7 @@ class Dashboard:
                 'items': [{
                     'id': m.get('id'), 'title': clean(m.get('title')),
                     'src': m['src'], 'channel': m.get('idx'),
+                    'channel_name': self._channel_label(m),
                     'ts': m.get('ts'), 'msg': clean(m.get('msg')),
                     'url': retry_url(m), 'youtube_id': youtube_id(m)}
                     for m in members[:MAX_GROUP_ITEMS]],
@@ -1626,6 +1669,15 @@ class Dashboard:
                                or record['end_ts'])
         bot = [ts for ts in bot if ts and ts > now - DAY]
         return out, bot
+
+    def _channel_label(self, item):
+        """Name (or short URL) of the channel a scheduled problem came from."""
+        if item['src'] != 'scheduled':
+            return ''
+        url = item.get('ch_url')
+        return (clean(self.events.channel_name(url, item.get('run'),
+                                               item.get('idx')), 120)
+                or short_url(url))
 
     def _pending(self, current, jobs_view):
         return {

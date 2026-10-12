@@ -1064,7 +1064,8 @@
         el('span', 'group-hint', g.hint || ''));
       var items = el('div', 'group-items');
       (g.items || []).forEach(function (it) {
-        var where = it.src === 'manual' ? 'manual' : (isNum(it.channel) ? 'channel ' + it.channel : 'scheduled');
+        var where = it.src === 'manual' ? 'manual'
+          : (it.channel_name || (isNum(it.channel) ? 'channel ' + it.channel : 'scheduled'));
         var row = add(el('div', 'list-row group-item'),
           el('span', 'mono', it.id || '—'),
           add(el('span', 'grow'), bdi(it.title || '(title unknown)')),
