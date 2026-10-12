@@ -557,7 +557,7 @@ def test_problems_from_the_last_run_and_failed_jobs(env):
     assert manual['src'] == 'manual' and manual['url'] == 'https://youtu.be/abc'
     finished = status['jobs']['finished']
     assert finished[0]['id'] == str(uuid.UUID(job))
-    assert finished[0]['state'] == 'failed' and finished[0]['src'] == 'ios'
+    assert finished[0]['state'] == 'failed' and finished[0]['src'] == 'api'
 
 
 def test_running_and_queued_jobs_from_the_snapshot(env):
@@ -603,7 +603,7 @@ def test_running_and_queued_jobs_from_the_snapshot(env):
     status = env.dash().status(jobs=snapshot)
     jobs = status['jobs']
     first = jobs['running'][0]
-    assert first['title'] == 'Lectures' and first['src'] == 'ios'
+    assert first['title'] == 'Lectures' and first['src'] == 'api'
     assert first['cancelling'] is True and first['state'] == 'running'
     assert first['items'] == {'done': 1, 'failed': 0}
     assert first['item'] == {'index': 2, 'count': 40, 'source': 'events'}

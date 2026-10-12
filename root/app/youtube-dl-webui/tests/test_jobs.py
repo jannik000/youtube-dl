@@ -278,7 +278,7 @@ def test_archived_youtube_video_is_answered_at_once(job_client):
         assert answer.json()['message'].startswith('Already downloaded')
     assert not fake.procs                       # yt-dlp never started
     already = status(client)['jobs']['finished'][0]
-    assert already['state'] == 'already' and already['src'] == 'ios'
+    assert already['state'] == 'already' and already['src'] == 'api'
     log = client.get(f'/log/download/{already["id"]}', auth=basic()).text
     assert 'already in the download archive' in log
     # The archive is read again when it changes.
@@ -499,7 +499,7 @@ def test_running_job_in_status_without_the_nonce(job_client):
                .get('percent') == 42.0)
     answer = client.get('/api/status', auth=basic())
     [running] = answer.json()['jobs']['running']
-    assert running['id'] == job_id and running['src'] == 'ios'
+    assert running['id'] == job_id and running['src'] == 'api'
     assert running['video']['title'] == 'Clip ü'
     assert running['item'] == {'index': 2, 'count': 5, 'source': 'events'}
     assert running['cancelling'] is False and running['force'] is False
@@ -596,7 +596,7 @@ def test_restart_recovery(job_client, webui_env):
     shown = status(client)
     assert [j['url'] for j in shown['jobs']['queued']] == ['https://example.com/second']
     assert shown['jobs']['queued'][0]['force'] is True
-    assert shown['jobs']['running'][0]['src'] == 'ios'
+    assert shown['jobs']['running'][0]['src'] == 'api'
     ends = {e['run']: e for e in events(client) if e['t'] == 'job_end'}
     assert ends[ids['running']]['state'] == 'interrupted'
     assert ends[ids['old']]['state'] == 'interrupted'

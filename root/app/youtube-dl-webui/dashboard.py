@@ -98,7 +98,7 @@ _SEVERITY_ORDER = {'error': 0, 'warning': 1, 'info': 2}
 JOB_STATES = frozenset({'queued', 'running', 'done', 'partial', 'failed',
                         'cancelled', 'interrupted', 'already'})
 
-_JOB_SOURCES = {'token': 'ios', 'basic': 'web'}
+_JOB_SOURCES = {'token': 'api', 'basic': 'web'}
 _HEX_RE = re.compile(r'[0-9a-f]{16,32}\Z')
 _JOB_RE = re.compile(r'[0-9a-f]{32}\Z')
 _YOUTUBE_ID_RE = re.compile(r'[A-Za-z0-9_-]{11}\Z')

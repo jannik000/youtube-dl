@@ -913,7 +913,7 @@
   }
 
   // Manual downloads
-  var SRC = { ios: 'iOS', web: 'Web' };
+  var SRC = { api: 'API', web: 'Web' };
   var STATE_TEXT = {
     done: 'Done', partial: 'Done with errors', failed: 'Failed', cancelled: 'Cancelled',
     interrupted: 'Interrupted', already: 'Already downloaded', running: 'Running', queued: 'Queued'
