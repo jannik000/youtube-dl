@@ -152,7 +152,7 @@ def test_writing_lines_and_parser(download):
     assert entry.progress['info.id'] == 'clip'
     parser.finish()
     assert parser.summary()['sum'] == {'new': 1, 'skipped': 0, 'failed': 0,
-                                       'filtered': 0}
+                                       'filtered': 0, 'members': 0}
 
 
 def _options(*argv):

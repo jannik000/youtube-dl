@@ -92,7 +92,7 @@ YOUTUBE_WATCH = 'https://www.youtube.com/watch?v='
 
 # Layout of the per-channel rows in run_end.ch.
 CHANNEL_ROW = ('idx', 'new', 'skipped', 'failed', 'filtered', 'rc', 'secs',
-               'ts', 'url')
+               'ts', 'url', 'members')
 
 
 def new_id():
@@ -244,7 +244,8 @@ KIND_LABELS = {
     'rate_limit': 'Rate-limited',
     'forbidden': 'Forbidden',
     'unavailable': 'Unavailable',
-    'private_members': 'Private or members-only',
+    'members_only': 'Members-only',
+    'private_members': 'Private or age-restricted',
     'geo': 'Blocked in this country',
     'disk_full': 'Disk full',
     'cookies_rotated': 'Cookies expired',
@@ -259,8 +260,11 @@ KIND_HINTS = {
                  'passes after a while or with a newer yt-dlp.',
     'unavailable': 'The video was removed or is not out yet; nothing to fix '
                    'unless the URL is wrong.',
-    'private_members': 'The video is private, members-only or age-restricted '
-                       'and needs cookies from an account that may watch it.',
+    'members_only': 'Only members of the channel can watch it, so it is '
+                    'skipped rather than failed; cookies of a member account '
+                    'in /config/cookies.txt would download it.',
+    'private_members': 'The video is private or age-restricted and needs '
+                       'cookies from an account that may watch it.',
     'geo': "The video is blocked in this server's country and cannot be "
            'downloaded from here.',
     'disk_full': 'The disk is full: free space under /downloads, then retry.',
@@ -278,8 +282,9 @@ _KIND_RULES = tuple((kind, re.compile(pattern, re.I)) for kind, pattern in (
     ('bot_check', r'not a bot\b'),
     ('rate_limit', r'HTTP Error 429|Too Many Requests|rate[- ]limit|'
                    r'try again later'),
-    ('private_members', r'Private video|This video is private|members[- ]only|'
-                        r'Join this channel|channel.s members|'
+    ('members_only', r'members[- ]only|Join this channel|channel.s members|'
+                     r'available to (?:this )?channel members'),
+    ('private_members', r'Private video|This video is private|'
                         r'confirm your age|age[- ]restricted|'
                         r'inappropriate for some users'),
     ('geo', r'available in your country|geo[- ]?restrict|'
@@ -290,6 +295,20 @@ _KIND_RULES = tuple((kind, re.compile(pattern, re.I)) for kind, pattern in (
                     r'has been terminated|This video is not available|'
                     r'Premieres in|live event will begin'),
 ))
+
+
+# Kinds that are not failures: yt-dlp reports them as errors (and exits 1),
+# but nothing is wrong and nothing can be fixed from here. They are counted
+# as 'members' instead of 'failed' and keep a run or a job 'ok'.
+SKIP_KINDS = frozenset({'members_only'})
+
+
+def only_skipped(failed, errors):
+    """True if a non-zero exit code is explained by skipped videos alone:
+    nothing failed and every error is of a SKIP_KINDS kind."""
+    errors = [e for e in errors or () if isinstance(e, dict)]
+    return (not failed and bool(errors)
+            and all(e.get('kind') in SKIP_KINDS for e in errors))
 
 
 def classify_detail(msg, warnings=()):
@@ -801,7 +820,7 @@ class LogParser:
                     if not entry.errors.get(vid):
                         active = vid
                     break
-        new = failed = 0
+        new = failed = members = 0
         errors = []
         seen = set(entry.entry_errors)
         for vid, video in videos.items():
@@ -810,10 +829,13 @@ class LogParser:
                 continue
             if vid == active:
                 continue
-            failed += 1
             msgs = [m for _explicit, m, _ie in entry.errors.get(vid, ())]
             kind, text = classify_detail(msgs[-1] if msgs else '',
                                          entry.warnings.get(vid, ()))
+            if kind in SKIP_KINDS:
+                members += 1
+            else:
+                failed += 1
             error = {'idx': entry.index, 'id': clean_text(vid, 64),
                      'kind': kind, 'msg': clean_text(text)}
             for key in ('title', 'url'):
@@ -842,9 +864,12 @@ class LogParser:
                 continue
             # Failed before yt-dlp started the video (e.g. unavailable, or a
             # 429 on the watch page): only the human line knows about it.
-            failed += 1
             msg, ie = explicit[-1]
             kind, text = classify_detail(msg, entry.warnings.get(vid, ()))
+            if kind in SKIP_KINDS:
+                members += 1
+            else:
+                failed += 1
             error = {'idx': entry.index, 'id': clean_text(vid, 64),
                      'kind': kind, 'msg': clean_text(text)}
             if ie:
@@ -857,13 +882,14 @@ class LogParser:
             errors.append({'idx': entry.index, 'id': None, 'kind': 'other',
                            'msg': entry.error})
         return {'new': new, 'skipped': entry.skipped, 'failed': failed,
-                'filtered': entry.filtered, 'errors': errors,
-                'active': active}
+                'filtered': entry.filtered, 'members': members,
+                'errors': errors, 'active': active}
 
     def summary(self):
         """{'sum': totals, 'ch': CHANNEL_ROW rows, 'err': errors} for run_end
         (or for a manual job with ``unmarked``)."""
-        totals = {'new': 0, 'skipped': 0, 'failed': 0, 'filtered': 0}
+        totals = {'new': 0, 'skipped': 0, 'failed': 0, 'filtered': 0,
+                  'members': 0}
         rows, errors = [], []
         for index, entry in self.entries.items():
             if (index is None) != self.unmarked:
@@ -875,7 +901,8 @@ class LogParser:
             if index is not None:
                 rows.append([index, result['new'], result['skipped'],
                              result['failed'], result['filtered'], entry.rc,
-                             entry.secs, entry.ts_end, entry.url])
+                             entry.secs, entry.ts_end, entry.url,
+                             result['members']])
         rows.sort(key=lambda row: row[0])
         return {'sum': totals, 'ch': rows, 'err': errors[:MAX_ERRORS],
                 'err_total': len(errors)}

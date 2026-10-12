@@ -426,6 +426,11 @@ def _video_events(client, proc, items):
                          'i': info}, status_dir)
 
 
+MEMBERS_ONLY = (b'ERROR: [youtube] aaaaaaaaaaa: Join this channel to get access to '
+                b'members-only content like this video, and other exclusive '
+                b'perks.\n')
+
+
 @pytest.mark.parametrize('rc,items,output,state,error', [
     (0, [('v1', 'First', True)], b'', 'done', None),
     (1, [('v1', 'First', True), ('v2', 'Second', False)],
@@ -439,6 +444,9 @@ def _video_events(client, proc, items):
     # args.conf's default --match-filter '!is_live' skipped the only video.
     (0, [], b'[download] Live Now does not pass filter (!is_live), '
      b'skipping ..\n', 'failed', 'other'),
+    # yt-dlp exits 1 for a members-only video: skipped, not failed.
+    (1, [], MEMBERS_ONLY, 'skipped', 'members_only'),
+    (1, [('v1', 'First', True)], MEMBERS_ONLY, 'done', None),
 ])
 def test_job_outcome(job_client, rc, items, output, state, error):
     client, fake = job_client()
@@ -460,6 +468,8 @@ def test_job_outcome(job_client, rc, items, output, state, error):
     if state in ('failed', 'partial'):
         [group] = [g for g in status(client)['problems'] if g['kind'] == error]
         assert group['items'][0]['src'] == 'manual'
+    if state == 'skipped':
+        assert status(client)['problems'] == []
     log = client.get(f'/log/download/{job_id}', auth=basic()).text
     assert log.endswith('[youtube-dl] Download process ended\n')
     assert ('exited with code' in log) == (rc != 0)

@@ -224,10 +224,15 @@ on a phone, a tablet and a desktop, in light and dark mode.
   job page (`/download/<id>`) shows one download with its log.
 * **Needs attention:** failures of the current and the last pass and failed
   manual downloads, grouped by cause (bot check, rate limit, forbidden,
-  unavailable, private or members-only, geo-blocked, disk full, cookies
+  unavailable, private or age-restricted, geo-blocked, disk full, cookies
   expired) with a one-line hint. Videos
   with a YouTube id get *Download now*, which queues the watch URL as a
   manual download.
+* **Members-only videos** are not failures: without cookies of a member
+  account yt-dlp cannot download them and exits with code 1, but the
+  dashboard counts them as *members-only* (a lock chip), keeps the pass and
+  the channel *ok* when nothing else failed, leaves them out of *Needs
+  attention*, and a manual download of one ends as *Skipped*.
 * **Recently downloaded**, **Channels** (per `channels.txt` line: last
   checked, last new video, last result; a channel without a new video for
   90 days is marked stale) and **Recent runs** (the last 10 passes).

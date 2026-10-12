@@ -93,10 +93,11 @@ KIND_SEVERITY = {
     'bot_check': 'error', 'cookies_rotated': 'error', 'disk_full': 'error',
     'rate_limit': 'warning', 'forbidden': 'warning', 'other': 'warning',
     'unavailable': 'info', 'private_members': 'info', 'geo': 'info',
+    'members_only': 'info',
 }
 _SEVERITY_ORDER = {'error': 0, 'warning': 1, 'info': 2}
 JOB_STATES = frozenset({'queued', 'running', 'done', 'partial', 'failed',
-                        'cancelled', 'interrupted', 'already'})
+                        'cancelled', 'interrupted', 'already', 'skipped'})
 
 _JOB_SOURCES = {'token': 'api', 'basic': 'web'}
 _HEX_RE = re.compile(r'[0-9a-f]{16,32}\Z')
@@ -338,7 +339,7 @@ class LineReader:
 def _sum(value):
     value = value if isinstance(value, dict) else {}
     return {key: _count(value.get(key))
-            for key in ('new', 'skipped', 'failed', 'filtered')}
+            for key in ('new', 'skipped', 'failed', 'filtered', 'members')}
 
 
 def _row(row):
@@ -352,7 +353,7 @@ def _row(row):
     return {'idx': idx, 'new': _count(row[1]), 'skipped': _count(row[2]),
             'failed': _count(row[3]), 'filtered': _count(row[4]),
             'rc': _int(row[5]), 'secs': _ts(row[6]), 'ts': _ts(row[7]),
-            'url': clean_url(row[8])}
+            'url': clean_url(row[8]), 'members': _count(row[9])}
 
 
 def _error(err):
@@ -526,16 +527,20 @@ class EventLog:
                 stats['name'] = names[row['idx']]
             if row['new']:
                 stats['last_new'] = checked
-            if row['rc'] is not None:
-                stats['fail_streak'] = (0 if row['rc'] in OK_CODES
-                                        else stats['fail_streak'] + 1)
             errors = [e for e in record['err'] if e['idx'] == row['idx']]
-            kinds = collections.Counter(e['kind'] for e in errors)
+            # Exit code 1 only because of members-only videos is no failure.
+            row_ok = (row['rc'] in OK_CODES
+                      or se.only_skipped(row['failed'], errors))
+            if row['rc'] is not None:
+                stats['fail_streak'] = (0 if row_ok
+                                        else stats['fail_streak'] + 1)
+            kinds = collections.Counter(e['kind'] for e in errors
+                                        if e['kind'] not in se.SKIP_KINDS)
             stats['last'] = {
                 'run': record['id'], 'idx': row['idx'], 'new': row['new'],
                 'skipped': row['skipped'], 'failed': row['failed'],
-                'filtered': row['filtered'], 'rc': row['rc'],
-                'secs': row['secs'],
+                'filtered': row['filtered'], 'members': row['members'],
+                'rc': row['rc'], 'ok': row_ok, 'secs': row['secs'],
                 'kind': kinds.most_common(1)[0][0] if kinds else None,
                 'entry_error': any(e['id'] is None for e in errors)}
         while len(self.channels) > MAX_CHANNELS:
@@ -1268,7 +1273,8 @@ class Dashboard:
     def _run_summary(self, record, running=False):
         result = None
         if record['ended']:
-            result = 'ok' if record['rc'] in OK_CODES else 'failed'
+            result = ('ok' if record['rc'] in OK_CODES or se.only_skipped(
+                record['sum'].get('failed'), record['err']) else 'failed')
         elif running:
             result = 'running'
         else:
@@ -1306,7 +1312,8 @@ class Dashboard:
         entry = parser.current if parser else None
         if entry is not None and entry.index is None:
             entry = None
-        totals = {'new': 0, 'skipped': 0, 'failed': 0, 'filtered': 0}
+        totals = {'new': 0, 'skipped': 0, 'failed': 0, 'filtered': 0,
+                  'members': 0}
         errors = []
         done_idx = 0
         if parser is not None:
@@ -1449,11 +1456,12 @@ class Dashboard:
             if stats is None:
                 continue
             last = stats['last'] or {}
+            rc_bad = (last.get('rc') not in OK_CODES + (None,)
+                      and not last.get('ok'))
             if last.get('entry_error') or (
-                    last.get('rc') not in OK_CODES + (None,)
-                    and not last.get('failed') and not last.get('new')):
+                    rc_bad and not last.get('failed') and not last.get('new')):
                 status = 'error'
-            elif last.get('failed') and last.get('rc') not in OK_CODES:
+            elif last.get('failed') and rc_bad:
                 # With exit code 0 the failures can only come from log lines
                 # a video title forged.
                 status = 'failed'
@@ -1469,7 +1477,8 @@ class Dashboard:
                 'last_new': stats['last_new'],
                 'fail_streak': stats['fail_streak'], 'status': status,
                 'last': {key: last.get(key) for key in (
-                    'new', 'skipped', 'failed', 'filtered', 'rc', 'kind')}})
+                    'new', 'skipped', 'failed', 'filtered', 'members', 'rc',
+                    'kind')}})
         order = {'error': 0, 'failed': 1, 'stale': 2, 'ok': 3}
         out.sort(key=lambda c: (order[c['status']], c['idx']))
         return out
@@ -1580,6 +1589,8 @@ class Dashboard:
         groups = {}
         seen = set()
         for item in items:
+            if item['kind'] in se.SKIP_KINDS:
+                continue   # skipped on purpose (members-only), not a problem
             key = (item['kind'], item['src'], item.get('id') or item['msg'])
             if key in seen:
                 continue

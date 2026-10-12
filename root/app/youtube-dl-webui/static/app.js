@@ -33,7 +33,7 @@
 
   var KIND_LABELS = {
     bot_check: 'Bot check', rate_limit: 'Rate-limited', forbidden: 'Forbidden',
-    unavailable: 'Unavailable', private_members: 'Private or members-only',
+    unavailable: 'Unavailable', members_only: 'Members-only', private_members: 'Private or age-restricted',
     geo: 'Blocked in this country', disk_full: 'Disk full',
     cookies_rotated: 'Cookies expired', other: 'Other error'
   };
@@ -746,7 +746,8 @@
       return { label: 'This run', value: '–', sub: 'no run yet' };
     }
     o.value = (c.new || 0) + ' new';
-    o.sub = (c.skipped || 0) + ' skipped · ' + (c.failed || 0) + ' failed · ' + (c.filtered || 0) + ' filtered';
+    o.sub = (c.skipped || 0) + ' skipped · ' + (c.failed || 0) + ' failed · ' + (c.filtered || 0) + ' filtered' +
+      (c.members ? ' · ' + c.members + ' members-only' : '');
     return o;
   }
 
@@ -820,7 +821,8 @@
       chip((c.new || 0) + ' new', 'ok', 'check', true),
       chip((c.skipped || 0) + ' skipped', 'idle', 'skip', true),
       chip((c.failed || 0) + ' failed', c.failed ? 'err' : 'idle', 'x', true),
-      chip((c.filtered || 0) + ' filtered', 'idle', 'filter', true));
+      chip((c.filtered || 0) + ' filtered', 'idle', 'filter', true),
+      c.members ? chip(c.members + ' members-only', 'idle', 'lock', true) : null);
   }
 
   var STATE_CHIP = {
@@ -916,11 +918,13 @@
   var SRC = { api: 'API', web: 'Web' };
   var STATE_TEXT = {
     done: 'Done', partial: 'Done with errors', failed: 'Failed', cancelled: 'Cancelled',
-    interrupted: 'Interrupted', already: 'Already downloaded', running: 'Running', queued: 'Queued'
+    interrupted: 'Interrupted', already: 'Already downloaded', running: 'Running', queued: 'Queued',
+    skipped: 'Skipped · members-only'
   };
   var STATE_TONE = {
     done: ['ok', 'check'], partial: ['warn', 'alert'], failed: ['err', 'x'], cancelled: ['idle', 'ban'],
-    interrupted: ['warn', 'alert'], already: ['idle', 'archive'], running: ['run', 'dot'], queued: ['idle', 'clock']
+    interrupted: ['warn', 'alert'], already: ['idle', 'archive'], running: ['run', 'dot'], queued: ['idle', 'clock'],
+    skipped: ['idle', 'lock']
   };
 
   function stateChip(job, medium) {
@@ -1024,7 +1028,7 @@
       parts.push(add(el('div', 'list'), finished.map(function (job) {
         var meta = [SRC[job.src] || null, ago(job.ended)];
         if (job.state === 'interrupted') { meta.push('web UI restarted'); }
-        if (job.error && job.error.msg && job.state !== 'failed') { meta.push(job.error.msg); }
+        if (job.error && job.error.msg && job.state !== 'failed' && job.state !== 'skipped') { meta.push(job.error.msg); }
         var title = add(el('span', 'grow small clamp-1' + (job.title ? '' : ' mono')), bdi(jobName(job)));
         if (job.title && job.url) { title.title = job.url; }
         var act = retryAction(job);
@@ -1177,7 +1181,9 @@
     done: 'Download finished.', partial: 'Finished, but some items failed.',
     failed: 'The download failed.', cancelled: 'The download was cancelled.',
     interrupted: 'The web UI restarted while this download ran.',
-    already: 'Already downloaded: the video is in the download archive.'
+    already: 'Already downloaded: the video is in the download archive.',
+    skipped: 'Not downloaded: only members of the channel can watch this video. Nothing went wrong; ' +
+      'to download such videos, put cookies of a member account into /config/cookies.txt.'
   };
 
   function renderJob(node, data) {
@@ -1213,7 +1219,7 @@
     } else {
       parts.push(el('p', null, JOB_MESSAGE[job.state] || 'The download ended.'));
       if (job.error && job.error.msg) {
-        parts.push(add(el('div', 'callout tone-' + (job.state === 'partial' ? 'warn' : 'err')),
+        parts.push(add(el('div', 'callout tone-' + (job.state === 'partial' ? 'warn' : job.state === 'skipped' ? 'idle' : 'err')),
           add(el('div', 'stack'), el('strong', null, kindLabel(job.error.kind)), el('div', 'mono', job.error.msg))));
       }
     }

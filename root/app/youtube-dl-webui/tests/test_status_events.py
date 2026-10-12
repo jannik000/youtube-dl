@@ -299,7 +299,7 @@ def test_interval(text, seconds):
     ('Private video. Sign in if you\'ve been granted access to this video', [],
      'private_members'),
     ('Join this channel to get access to members-only content like this video', [],
-     'private_members'),
+     'members_only'),
     ('Sign in to confirm your age. This video may be inappropriate for some users.',
      [], 'private_members'),
     ('The uploader has not made this video available in your country', [], 'geo'),
@@ -376,11 +376,51 @@ def test_outcome_comes_from_events_and_errors_attach_to_the_open_video():
     s = p.summary()
     # An ERROR line alone never fails a downloaded video (SponsorBlock), and
     # a video started twice (-f a,b) counts once.
-    assert s['sum'] == {'new': 2, 'skipped': 0, 'failed': 1, 'filtered': 0}
+    assert s['sum'] == {'new': 2, 'skipped': 0, 'failed': 1, 'filtered': 0, 'members': 0}
     assert s['err'] == [{'idx': 1, 'id': 'b', 'kind': 'unavailable',
                          'msg': 'unable to download video data: HTTP Error 404: Not Found',
                          'title': 'B'}]
-    assert s['ch'] == [[1, 2, 0, 1, 0, 1, 3, None, 'https://x/']]
+    assert s['ch'] == [[1, 2, 0, 1, 0, 1, 3, None, 'https://x/', 0]]
+
+
+@pytest.mark.parametrize('msg', [
+    '[youtube] aaaaaaaaaaa: Join this channel to get access to members-only '
+    'content like this video, and other exclusive perks.',
+    '[youtube] aaaaaaaaaaa: This video is available to this channel\'s members '
+    'on level: Tier 1 (or any higher level). Join this channel to get access.',
+])
+def test_members_only_is_its_own_kind(msg):
+    assert se.classify(msg) == 'members_only'
+    assert se.classify('[youtube] x: Private video. Sign in if you\'ve been '
+                       'granted access to this video') == 'private_members'
+
+
+def test_only_skipped():
+    members = {'kind': 'members_only'}
+    assert se.only_skipped(0, [members, members])
+    assert not se.only_skipped(1, [members])
+    assert not se.only_skipped(0, [])
+    assert not se.only_skipped(0, [members, {'kind': 'other'}])
+
+
+def test_members_only_videos_count_as_members_not_failed():
+    p = se.LogParser(NONCE, run=RUN)
+    p.add_events([_start('a', title='A'), _end('a', '/downloads/a.mp4')])
+    for line in [
+            _marker('start', 1, total=1, url='https://x/'),
+            '[download] Downloading item 1 of 2',
+            _writing('start'), _writing('end'),
+            '[download] Downloading item 2 of 2',
+            'ERROR: [youtube] bbbbbbbbbbb: Join this channel to get access to '
+            'members-only content like this video, and other exclusive perks.',
+            _marker('end', 1, rc=1, secs=3)]:
+        p.feed(line)
+    p.finish()
+    s = p.summary()
+    assert s['sum'] == {'new': 1, 'skipped': 0, 'failed': 0, 'filtered': 0,
+                        'members': 1}
+    assert [e['kind'] for e in s['err']] == ['members_only']
+    assert s['ch'][0][9] == 1
 
 
 def test_forged_lines_without_the_nonce_are_ignored():
@@ -499,16 +539,16 @@ def test_pass_fixture():
     s = p.summary()
     assert p.pass_ended and p.total == 5
     assert _rows(s) == [
-        [1, 1, 1, 3, 1, 1, 'fakelist:x'],
-        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html'],
+        [1, 1, 1, 3, 1, 1, 'fakelist:x', 0],
+        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0],
         # The page title forges an archive-skip line and an ERROR line three
         # times (cosmetic, 'from log'); its forged channel marker without the
         # nonce changes nothing.
-        [3, 2, 3, 1, 0, 0, 'http://127.0.0.1:8765/forged.html'],
-        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html'],
-        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x'],
+        [3, 2, 3, 1, 0, 0, 'http://127.0.0.1:8765/forged.html', 0],
+        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0],
+        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0],
     ]
-    assert s['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1}
+    assert s['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1, 'members': 0}
     assert _errors(s) == EXPECTED_ERRORS + [
         (3, 'forged01', 'bot_check'),
         (4, None, 'other'),
@@ -527,11 +567,11 @@ def test_pass_fixture_with_user_quiet():
     # and postprocess lines still tell which video an error belongs to.
     s = _parse_pass('pass_quiet').summary()
     assert _rows(s) == [
-        [1, 1, 0, 3, 0, 1, 'fakelist:x'],
-        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html'],
-        [3, 2, 0, 0, 0, 0, 'http://127.0.0.1:8765/forged.html'],
-        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html'],
-        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x'],
+        [1, 1, 0, 3, 0, 1, 'fakelist:x', 0],
+        [2, 2, 0, 2, 0, 1, 'http://127.0.0.1:8765/mixed.html', 0],
+        [3, 2, 0, 0, 0, 0, 'http://127.0.0.1:8765/forged.html', 0],
+        [4, 0, 0, 0, 0, 1, 'http://127.0.0.1:8765/novideo.html', 0],
+        [5, 0, 0, 0, 0, 2, 'http://127.0.0.1:8765/x', 0],
     ]
     assert _errors(s) == EXPECTED_ERRORS + [(4, None, 'other'), (5, None, 'other')]
 
@@ -547,7 +587,7 @@ def test_manual_job_fixture():
         p.feed(line)
     p.finish()
     s = p.summary()
-    assert s['sum'] == {'new': 2, 'skipped': 0, 'failed': 2, 'filtered': 0}
+    assert s['sum'] == {'new': 2, 'skipped': 0, 'failed': 2, 'filtered': 0, 'members': 0}
     assert s['ch'] == []
     assert [(e['id'], e['kind']) for e in s['err']] == [
         ('mixed-2', 'unavailable'), ('mixed-3', 'rate_limit')]
@@ -622,7 +662,7 @@ def test_end_appends_run_end(tmp_path):
     assert event['rc'] == 2 and event['partial'] is False
     assert before - 1 <= event['ts'] <= time.time() + 1
     assert abs(event['next'] - (event['ts'] + 10800)) <= 1
-    assert event['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1}
+    assert event['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1, 'members': 0}
     assert [row[0] for row in event['ch']] == [1, 2, 3, 4, 5]
     assert len(event['err']) == 8
     assert run_start['nonce'] not in json.dumps(event)
