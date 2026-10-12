@@ -105,7 +105,7 @@ def run_end(run='a' * 16, ts=NOW - 50, rc=0, nxt=NOW + 3600, rows=(),
     return {'v': 1, 't': 'run_end', 'ts': ts, 'run': run, 'rc': rc,
             'next': nxt, 'partial': False,
             'sum': total or {'new': 0, 'skipped': 0, 'failed': 0,
-                             'filtered': 0},
+                             'filtered': 0, 'members': 0},
             'ch': list(rows), 'err': list(err)}
 
 
@@ -386,7 +386,7 @@ def test_live_pass_progress_counts_and_pending(env):
     # Entry 1 is over: v1 new, v6 archived, v4 filtered, v2/v3/v5 failed.
     # Entry 2: mixed-4 new, mixed-3 and mixed-2 failed, mixed-1 running.
     assert current['counts'] == {'new': 2, 'skipped': 1, 'failed': 5,
-                                 'filtered': 1}
+                                 'filtered': 1, 'members': 0}
     assert status['pending'] == {'queued': 0, 'channels_left': 3,
                                  'in_channel_max': 0}
     assert current['channels_left'] == 3 and current['in_channel_max'] == 0
@@ -421,7 +421,7 @@ def test_live_video_with_an_error_counts_as_failed(env):
               lambda e: e['t'] == 'start' and e['i']['id'] == 'v2')
     current = env.dash().status()['current']
     assert current['counts'] == {'new': 0, 'skipped': 1, 'failed': 3,
-                                 'filtered': 1}
+                                 'filtered': 1, 'members': 0}
     assert current['item'] == {'index': 5, 'count': 6, 'source': 'events'}
 
 
@@ -459,7 +459,7 @@ def test_live_pass_follows_new_lines_and_events(env):
     assert status['current']['channel']['index'] == 5
     assert status['current']['overall'] == 100.0
     assert status['current']['counts'] == {'new': 5, 'skipped': 4,
-                                           'failed': 6, 'filtered': 1}
+                                           'failed': 6, 'filtered': 1, 'members': 0}
 
 
 def test_a_new_pass_log_is_parsed_again(env):
@@ -504,7 +504,7 @@ def test_finished_pass(env):
     assert status['current'] is None
     last = status['last_run']
     assert last['result'] == 'failed' and last['rc'] == 1
-    assert last['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1}
+    assert last['sum'] == {'new': 5, 'skipped': 4, 'failed': 6, 'filtered': 1, 'members': 0}
     channels = {c['idx']: c for c in status['channels']}
     assert [c['idx'] for c in status['channels']] == [4, 5, 1, 2, 3]
     assert channels[4]['status'] == 'error'       # unsupported URL
@@ -512,7 +512,8 @@ def test_finished_pass(env):
     assert channels[1]['status'] == 'failed'
     assert channels[1]['name'] == 'Fake Channel'
     assert channels[1]['last'] == {'new': 1, 'skipped': 1, 'failed': 3,
-                                   'filtered': 1, 'rc': 1, 'kind': 'bot_check'}
+                                   'filtered': 1, 'rc': 1, 'kind': 'bot_check',
+                                   'members': 0}
     assert channels[1]['fail_streak'] == 1 and channels[1]['last_new']
     assert channels[3]['status'] == 'ok' and channels[3]['fail_streak'] == 0
     groups = {g['kind']: g for g in status['problems']}
@@ -552,12 +553,13 @@ def test_problems_from_the_last_run_and_failed_jobs(env):
     assert bot['hint'] == se.KIND_HINTS['bot_check']
     assert bot['items'][0]['url'] == 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
     assert bot['items'][0]['ts'] == NOW - 60 and bot['items'][0]['channel'] == 1
+    assert bot['items'][0]['channel_name'] == '@a'   # name not known yet
     assert groups['other']['items'][0]['msg'] == 'x'
     manual = groups['rate_limit']['items'][0]
     assert manual['src'] == 'manual' and manual['url'] == 'https://youtu.be/abc'
     finished = status['jobs']['finished']
     assert finished[0]['id'] == str(uuid.UUID(job))
-    assert finished[0]['state'] == 'failed' and finished[0]['src'] == 'ios'
+    assert finished[0]['state'] == 'failed' and finished[0]['src'] == 'api'
 
 
 def test_running_and_queued_jobs_from_the_snapshot(env):
@@ -603,7 +605,7 @@ def test_running_and_queued_jobs_from_the_snapshot(env):
     status = env.dash().status(jobs=snapshot)
     jobs = status['jobs']
     first = jobs['running'][0]
-    assert first['title'] == 'Lectures' and first['src'] == 'ios'
+    assert first['title'] == 'Lectures' and first['src'] == 'api'
     assert first['cancelling'] is True and first['state'] == 'running'
     assert first['items'] == {'done': 1, 'failed': 0}
     assert first['item'] == {'index': 2, 'count': 40, 'source': 'events'}
@@ -621,6 +623,50 @@ def test_running_and_queued_jobs_from_the_snapshot(env):
 
 
 # -- channels and runs -----------------------------------------------------------
+
+def test_problems_name_their_channel(env):
+    url = 'https://www.youtube.com/@a'
+    env.events([
+        run_start(),
+        {'v': 1, 't': 'start', 'src': 'scheduled', 'run': 'a' * 16, 'ch': 1,
+         'i': {'id': 'x', 'channel': 'Alpha'}},
+        run_end(rc=1, rows=[[1, 0, 0, 1, 0, 1, 3, NOW - 60, url]],
+                err=[{'idx': 1, 'id': 'x', 'kind': 'rate_limit', 'msg': '429'}])])
+    dash = env.dash()
+    [group] = dash.status()['problems']
+    assert group['items'][0]['channel_name'] == 'Alpha'
+    nonce, names = dash.log_context()
+    assert nonce == 'b' * 16 and names[url] == 'Alpha'
+
+
+def test_members_only_videos_are_skipped_not_failed(env):
+    url = 'https://www.youtube.com/@a'
+    err = [{'idx': 1, 'id': 'dQw4w9WgXcQ', 'ie': 'youtube', 'kind': 'members_only',
+            'msg': 'Join this channel to get access to members-only content'}]
+    total = {'new': 1, 'skipped': 0, 'failed': 0, 'filtered': 0, 'members': 1}
+    # yt-dlp exits 1 when it skipped a members-only video.
+    env.events([run_start(), run_end(rc=1, err=err, total=total, rows=[
+        [1, 1, 0, 0, 0, 1, 3, NOW - 60, url, 1]])])
+    status = env.dash().status()
+    assert status['last_run']['result'] == 'ok'
+    assert status['last_run']['sum']['members'] == 1
+    assert status['problems'] == []
+    [channel] = status['channels']
+    assert channel['status'] == 'ok' and channel['fail_streak'] == 0
+    assert channel['last']['members'] == 1 and channel['last']['failed'] == 0
+
+
+def test_a_real_failure_next_to_members_only_still_fails(env):
+    err = [{'idx': 1, 'id': 'a', 'kind': 'members_only', 'msg': 'members-only'},
+           {'idx': 1, 'id': 'b', 'kind': 'rate_limit', 'msg': 'HTTP Error 429'}]
+    total = {'new': 0, 'skipped': 0, 'failed': 1, 'filtered': 0, 'members': 1}
+    env.events([run_start(), run_end(rc=1, err=err, total=total, rows=[
+        [1, 0, 0, 1, 0, 1, 3, NOW - 60, 'https://www.youtube.com/@a', 1]])])
+    status = env.dash().status()
+    assert status['last_run']['result'] == 'failed'
+    assert [g['kind'] for g in status['problems']] == ['rate_limit']
+    assert status['channels'][0]['fail_streak'] == 1
+
 
 def test_channel_history(env):
     url_a, url_b, url_c = ('https://www.youtube.com/@a', 'https://www.youtube.com/@b',
@@ -900,6 +946,35 @@ def test_scrub_log_line(line, nonce, shown):
     assert dashboard.scrub_log_line(line, nonce) == shown
 
 
+def test_channel_marker_shows_the_channel_name():
+    marker = ('@@ytdl:' + PASS_NONCE + ' channel {"phase":"start","index":2,'
+              '"total":5,"url":"https://www.youtube.com/@a","ts":1}')
+    url = 'https://www.youtube.com/@a'
+    assert dashboard.scrub_log_line(marker, PASS_NONCE, {url: 'Alpha'}) == (
+        '[dashboard] Channel 2 of 5: Alpha (https://www.youtube.com/@a)')
+    # The newest pass's own name for the index wins over an older one.
+    assert dashboard.scrub_log_line(
+        marker, PASS_NONCE, {url: 'Old', 2: 'New'}).endswith(': New (' + url + ')')
+    # A name cannot carry a marker, a nonce or control characters.
+    shown = dashboard.scrub_log_line(
+        marker, PASS_NONCE, {2: 'Evil\u202e @@ytdl:' + PASS_NONCE + '\x1b[31m'})
+    assert PASS_NONCE not in shown and '\u202e' not in shown
+    assert '\x1b' not in shown and shown.startswith('[dashboard] Channel 2 of 5: Evil')
+    # Without a nonce match the names change nothing.
+    assert dashboard.scrub_log_line(marker, 'f' * 16, {2: 'New'}) is None
+
+
+@pytest.mark.parametrize('url,short', [
+    ('https://www.youtube.com/@a', '@a'),
+    ('https://www.youtube.com/channel/UCabc/', 'channel/UCabc'),
+    ('https://youtube.com/playlist?list=PLx', 'playlist?list=PLx'),
+    ('https://vimeo.com/user1', 'vimeo.com/user1'),
+    (None, ''),
+])
+def test_short_url(url, short):
+    assert dashboard.short_url(url) == short
+
+
 def _lines(n, width=99):
     return ''.join(f'{i:0{width - 1}d}\n' for i in range(n))
 
@@ -1061,6 +1136,7 @@ def test_no_response_reveals_the_nonce(make_client):
         assert PASS_NONCE not in response.text
     log = responses[1].json()
     assert log['reset'] and '[dashboard] Channel 3 of 5' in log['text']
+    assert '[dashboard] Channel 1 of 5: Fake Channel (fakelist:x)' in log['text']
     # The events file holds the nonce; it is never served.
     with open(module.PATHS.events_file) as f:
         assert PASS_NONCE in f.read()
@@ -1208,7 +1284,7 @@ def test_attaching_to_a_pass_with_many_events_counts_them_all(env, monkeypatch):
         env, '0.1% of  832.66KiB at  Unknown B/s ETA Unknown @@ytdl:'
         + PASS_NONCE, lambda e: e['t'] == 'start' and e['i']['id'] == 'mixed-1')
     dash = env.dash()
-    expected = {'new': 2, 'skipped': 1, 'failed': 5, 'filtered': 1}
+    expected = {'new': 2, 'skipped': 1, 'failed': 5, 'filtered': 1, 'members': 0}
     assert dash.status()['current']['counts'] == expected
     # tee truncates and the log comes back (the log is parsed again).
     env.set_log(['x'])

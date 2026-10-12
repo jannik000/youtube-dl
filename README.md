@@ -224,14 +224,21 @@ on a phone, a tablet and a desktop, in light and dark mode.
   job page (`/download/<id>`) shows one download with its log.
 * **Needs attention:** failures of the current and the last pass and failed
   manual downloads, grouped by cause (bot check, rate limit, forbidden,
-  unavailable, private or members-only, geo-blocked, disk full, cookies
+  unavailable, private or age-restricted, geo-blocked, disk full, cookies
   expired) with a one-line hint. Videos
   with a YouTube id get *Download now*, which queues the watch URL as a
   manual download.
+* **Members-only videos** are not failures: without cookies of a member
+  account yt-dlp cannot download them and exits with code 1, but the
+  dashboard counts them as *members-only* (a lock chip), keeps the pass and
+  the channel *ok* when nothing else failed, leaves them out of *Needs
+  attention*, and a manual download of one ends as *Skipped*.
 * **Recently downloaded**, **Channels** (per `channels.txt` line: last
   checked, last new video, last result; a channel without a new video for
   90 days is marked stale) and **Recent runs** (the last 10 passes).
-* **Log:** the pass log or a download's log, tailed live, with filters
+* **Log:** the pass log (each channel starts with a "Channel *i* of *n*:
+  *name* (*URL*)" line; the name is known once a pass has seen one of its
+  videos) or a download's log, tailed live, with filters
   (errors and warnings, hide archive skips), follow, copy and download.
 
 **Honest limits**
@@ -252,7 +259,7 @@ on a phone, a tablet and a desktop, in light and dark mode.
   dashboard break.
 
 **Without JavaScript** the page says that live status needs JavaScript; the
-download form and the editors still work. Browser navigations get HTML error
+download form, the channel list and the editors still work. Browser navigations get HTML error
 pages (for example the confirmation for *Run now* while a pass runs); API
 clients keep getting JSON.
 
@@ -459,6 +466,15 @@ runtime.
     # Download a whole playlist, also disable reverse download order
     https://www.youtube.com/playlist?list=D9sLB5EVaCarZ7lbpQfGch3jJuYCRt | --playlist-end '-1' --no-playlist-reverse
     ```
+    **In the web UI** (*Edit → Channels*) the file is a list: each channel with its name (once a
+    pass has seen one of its videos), its URL, its ` | ` options and its last result. *Add* takes a
+    channel URL or an `@handle` (stored as `https://www.youtube.com/@handle`) plus optional options
+    for that line, refuses duplicates and validates the options like the text editor does; the ×
+    removes one line, with *Undo* right after. Comments, blank lines and the order of the file stay
+    as they are. Changes apply from the next pass; a running pass is not interrupted. *Edit as
+    text* opens the whole file (saving there restarts the pass). With `WEBUI_READONLY=true` the
+    list is read-only; the API token cannot change it.
+
     Adding with Docker:  
     `docker exec youtube-dl bash -c 'echo "# NAME" >> ./channels.txt'`  
     `docker exec youtube-dl bash -c 'echo "URL" >> ./channels.txt'`

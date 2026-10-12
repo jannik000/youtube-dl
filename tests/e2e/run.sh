@@ -244,13 +244,26 @@ check "the pass's nonce is known" test -n "$nonce"
 for path in /api/status /log/youtube-dl '/api/log/youtube-dl?since=0' "/api/log/download/$dl_id?since=0"; do
   check "nonce never leaves the server ($path)" served_without_nonce "$nonce" "$path"
 done
+# Channel manager (the pass has ended: run_end above). Add, refuse unsafe
+# options, remove; the file ends up as before.
+check "channel list shows channels.txt with the CSRF field" \
+  sh -c "curl -s -u '$USER_NAME:$USER_PASS' $BASE/edit/channels | grep -q 'example.invalid/plain-channel' && curl -s -u '$USER_NAME:$USER_PASS' $BASE/edit/channels | grep -qF 'name=\"csrf_token\" value=\"$csrf\"'"
+check "adding a channel works (303) and appends one line" \
+  sh -c "test \"\$(curl -s -o /dev/null -w '%{http_code}' -u '$USER_NAME:$USER_PASS' -H 'Sec-Fetch-Site: same-origin' --data-urlencode 'url=@e2e-added' --data-urlencode 'options=--playlist-end 2' --data-urlencode 'csrf_token=$csrf' $BASE/edit/channels/add)\" = 303 && grep -qxF 'https://www.youtube.com/@e2e-added | --playlist-end 2' '$A/config/channels.txt'"
+check "adding a channel with --exec options is refused (400)" \
+  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode 'url=@e2e-evil' --data-urlencode "options=--exec 'touch /config/PWNED_channel_add'" --data-urlencode "csrf_token=$csrf" "$BASE/edit/channels/add")" = 400
+check "removing a channel works (303)" \
+  test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode 'line=https://www.youtube.com/@e2e-added | --playlist-end 2' --data-urlencode "csrf_token=$csrf" "$BASE/edit/channels/remove")" = 303
+check "channels.txt is back as before (and has no refused channel)" \
+  sh -c "grep -q 'plain-channel' '$A/config/channels.txt' && ! grep -q 'e2e-' '$A/config/channels.txt'"
+
 # confirm=1: the pass may still be writing its summary, and while a pass
 # runs, 'Run now' answers 409 unless the client confirms the abort.
 check "restart via POST with CSRF token (303)" \
   test "$(http_code -u "$USER_NAME:$USER_PASS" -H 'Sec-Fetch-Site: same-origin' --data-urlencode "csrf_token=$csrf" --data-urlencode confirm=1 "$BASE/restart-youtube-dl")" = 303
 
 # The marker checks only mean something if the payloads were actually processed.
-for marker in PWNED_channels PWNED_args PWNED_url PWNED_opt PWNED_exec; do
+for marker in PWNED_channels PWNED_args PWNED_url PWNED_opt PWNED_exec PWNED_channel_add; do
   if [ "$pass_done" = true ]; then
     check "no injected command ran ($marker absent)" test ! -e "$A/config/$marker"
   else

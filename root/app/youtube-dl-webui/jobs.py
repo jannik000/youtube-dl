@@ -506,6 +506,7 @@ class JobManager:
                 'failed': 'Download failed.',
                 'cancelled': 'Download cancelled.',
                 'interrupted': 'Download interrupted (the web UI restarted).',
+                'skipped': 'Not downloaded: members-only video.',
             }.get(job.state, 'Download ended.')
         return {'id': job.id, 'state': job.state, 'position': position,
                 'message': message}
@@ -882,6 +883,9 @@ class JobManager:
                 state = 'failed'
                 failure = ('Nothing downloaded: skipped by --match-filter in '
                            'args.conf (a live stream or premiere?).')
+        elif se.only_skipped(result['failed'], result['errors']):
+            # yt-dlp exits 1 for members-only videos: skipped, not failed.
+            state = 'done' if result['new'] else 'skipped'
         else:
             state = 'partial' if result['new'] else 'failed'
         title = ''
@@ -893,7 +897,7 @@ class JobManager:
         if not title and entry is not None:
             title = entry.playlist or (entry.progress or {}).get('info.title')
         error = None
-        if state in ('failed', 'partial'):
+        if state in ('failed', 'partial', 'skipped'):
             errors = result['errors']
             pick = next((e for e in errors if e['kind'] != 'other'),
                         errors[0] if errors else None)

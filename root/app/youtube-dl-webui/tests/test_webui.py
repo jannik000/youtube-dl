@@ -247,6 +247,9 @@ POST_ROUTES = [(route, {field: [value]}) for route, field, value in SAVE_ROUTES]
     (f'/api/download/{JOB_ID}/cancel', {}),
     (f'/api/download/{JOB_ID}/retry', {}),
     ('/api/download-now', {'video_id': 'dQw4w9WgXcQ'}),
+    ('/edit/channels/add', {'url': 'https://www.youtube.com/@x'}),
+    ('/edit/channels/remove', {'line': 'https://www.youtube.com/@x'}),
+    ('/edit/channels/undo', {}),
 ]
 
 
@@ -296,6 +299,7 @@ def test_unsafe_args_flag_allows_exec(make_client):
 
 @pytest.mark.parametrize('path', [
     '/', '/log/youtube-dl', '/edit/args', '/edit/channels', '/edit/archive',
+    '/edit/channels/text',
     f'/log/download/{uuid.uuid4()}', f'/download/{uuid.uuid4()}',
     '/docs', '/redoc', '/openapi.json', '/no-such-route',
 ])
@@ -456,7 +460,7 @@ def test_refused_args_show_the_editor_again(make_client):
 
 @pytest.mark.parametrize('page,field,name', [
     ('/edit/args', 'args_new', 'args.conf'),
-    ('/edit/channels', 'channels_new', 'channels.txt'),
+    ('/edit/channels/text', 'channels_new', 'channels.txt'),
     ('/edit/archive', 'archive_new', 'archive.txt')])
 def test_edit_pages_show_the_file(make_client, page, field, name):
     client, _ = make_client()

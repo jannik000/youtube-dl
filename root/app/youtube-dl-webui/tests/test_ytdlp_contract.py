@@ -152,7 +152,7 @@ def test_writing_lines_and_parser(download):
     assert entry.progress['info.id'] == 'clip'
     parser.finish()
     assert parser.summary()['sum'] == {'new': 1, 'skipped': 0, 'failed': 0,
-                                       'filtered': 0}
+                                       'filtered': 0, 'members': 0}
 
 
 def _options(*argv):
@@ -262,4 +262,4 @@ def test_manual_jobs_with_the_real_ytdlp(server, tmp_path):
     assert [(j['id'], j['state']) for j in finished] == [
         (forced.id, 'done'), (skipped.id, 'already'), (done.id, 'done')]
     assert finished[2]['items'] == {'done': 1, 'failed': 0}
-    assert finished[2]['src'] == 'ios' and finished[2]['title'] == 'clip'
+    assert finished[2]['src'] == 'api' and finished[2]['title'] == 'clip'

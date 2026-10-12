@@ -278,7 +278,7 @@ def test_archived_youtube_video_is_answered_at_once(job_client):
         assert answer.json()['message'].startswith('Already downloaded')
     assert not fake.procs                       # yt-dlp never started
     already = status(client)['jobs']['finished'][0]
-    assert already['state'] == 'already' and already['src'] == 'ios'
+    assert already['state'] == 'already' and already['src'] == 'api'
     log = client.get(f'/log/download/{already["id"]}', auth=basic()).text
     assert 'already in the download archive' in log
     # The archive is read again when it changes.
@@ -426,6 +426,11 @@ def _video_events(client, proc, items):
                          'i': info}, status_dir)
 
 
+MEMBERS_ONLY = (b'ERROR: [youtube] aaaaaaaaaaa: Join this channel to get access to '
+                b'members-only content like this video, and other exclusive '
+                b'perks.\n')
+
+
 @pytest.mark.parametrize('rc,items,output,state,error', [
     (0, [('v1', 'First', True)], b'', 'done', None),
     (1, [('v1', 'First', True), ('v2', 'Second', False)],
@@ -439,6 +444,9 @@ def _video_events(client, proc, items):
     # args.conf's default --match-filter '!is_live' skipped the only video.
     (0, [], b'[download] Live Now does not pass filter (!is_live), '
      b'skipping ..\n', 'failed', 'other'),
+    # yt-dlp exits 1 for a members-only video: skipped, not failed.
+    (1, [], MEMBERS_ONLY, 'skipped', 'members_only'),
+    (1, [('v1', 'First', True)], MEMBERS_ONLY, 'done', None),
 ])
 def test_job_outcome(job_client, rc, items, output, state, error):
     client, fake = job_client()
@@ -460,6 +468,8 @@ def test_job_outcome(job_client, rc, items, output, state, error):
     if state in ('failed', 'partial'):
         [group] = [g for g in status(client)['problems'] if g['kind'] == error]
         assert group['items'][0]['src'] == 'manual'
+    if state == 'skipped':
+        assert status(client)['problems'] == []
     log = client.get(f'/log/download/{job_id}', auth=basic()).text
     assert log.endswith('[youtube-dl] Download process ended\n')
     assert ('exited with code' in log) == (rc != 0)
@@ -499,7 +509,7 @@ def test_running_job_in_status_without_the_nonce(job_client):
                .get('percent') == 42.0)
     answer = client.get('/api/status', auth=basic())
     [running] = answer.json()['jobs']['running']
-    assert running['id'] == job_id and running['src'] == 'ios'
+    assert running['id'] == job_id and running['src'] == 'api'
     assert running['video']['title'] == 'Clip ü'
     assert running['item'] == {'index': 2, 'count': 5, 'source': 'events'}
     assert running['cancelling'] is False and running['force'] is False
@@ -596,7 +606,7 @@ def test_restart_recovery(job_client, webui_env):
     shown = status(client)
     assert [j['url'] for j in shown['jobs']['queued']] == ['https://example.com/second']
     assert shown['jobs']['queued'][0]['force'] is True
-    assert shown['jobs']['running'][0]['src'] == 'ios'
+    assert shown['jobs']['running'][0]['src'] == 'api'
     ends = {e['run']: e for e in events(client) if e['t'] == 'job_end'}
     assert ends[ids['running']]['state'] == 'interrupted'
     assert ends[ids['old']]['state'] == 'interrupted'
