@@ -639,6 +639,32 @@ def test_problems_name_their_channel(env):
     assert nonce == 'b' * 16 and names[url] == 'Alpha'
 
 
+def test_channel_name_from_the_run_row_without_any_video(env):
+    url = 'https://youtube.com/@codebullet'
+    env.events([run_start(), run_end(rows=[
+        [1, 0, 16, 0, 0, 0, 3, NOW - 60, url, 0, 'Code Bullet']])])
+    dash = env.dash()
+    [channel] = dash.status()['channels']
+    assert channel['name'] == 'Code Bullet'
+    assert dash.log_context()[1][url] == 'Code Bullet'
+    assert dash.channel_info()[url]['name'] == 'Code Bullet'
+
+
+def test_live_log_names_channels_from_their_playlist(env):
+    env.events([run_start(run=PASS_RUN, nonce=PASS_NONCE, ts=PASS_TS,
+                          pid=PASS_PID, channels=2)])
+    marker = ('@@ytdl:' + PASS_NONCE + ' channel {"phase":"start","index":1,'
+              '"total":2,"url":"https://youtube.com/@codebullet","ts":1}')
+    env.set_log([marker, '[download] Downloading playlist: Code Bullet - Videos'])
+    env.process(PASS_PID)
+    env.now = PASS_TS + 20
+    dash = env.dash()
+    assert dash.status()['current']['channel']['name'] == 'Code Bullet'
+    nonce, names = dash.log_context()
+    assert dashboard.read_log_tail(env.log, 65536, nonce, names).startswith(
+        '[dashboard] Channel 1 of 2: Code Bullet (https://youtube.com/@codebullet)')
+
+
 def test_members_only_videos_are_skipped_not_failed(env):
     url = 'https://www.youtube.com/@a'
     err = [{'idx': 1, 'id': 'dQw4w9WgXcQ', 'ie': 'youtube', 'kind': 'members_only',
