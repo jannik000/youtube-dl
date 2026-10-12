@@ -423,6 +423,46 @@ def test_members_only_videos_count_as_members_not_failed():
     assert s['ch'][0][9] == 1
 
 
+JOIN = ('WARNING: [youtube] Join this channel to get access to members-only '
+        'content like this video, and other exclusive perks.')
+
+
+@pytest.mark.parametrize('with_event', [True, False])
+def test_members_only_warning_without_an_id(with_event):
+    # yt-dlp (args.conf: --ignore-no-formats-error) warns without naming the
+    # video while extracting it, then fails with a generic error.
+    p = se.LogParser(NONCE, run=RUN)
+    if with_event:
+        p.add_events([_start('f2UExqbyd3U', title='Vikings'), _end('f2UExqbyd3U')])
+    lines = [
+        _marker('start', 1, total=1, url='https://x/'),
+        'WARNING: [youtube] Cookies are no longer valid',   # before any item
+        '[download] Downloading item 14 of 16',
+        '[youtube] Extracting URL: https://www.youtube.com/watch?v=f2UExqbyd3U',
+        '[youtube] f2UExqbyd3U: Downloading webpage',
+        JOIN,
+        'WARNING: No video formats found!',
+    ]
+    if with_event:
+        lines += [_writing('start'), _writing('end')]
+    lines += [
+        'ERROR: [youtube] f2UExqbyd3U: No video formats found!',
+        '[download] Downloading item 15 of 16',
+        '[youtube] Extracting URL: https://www.youtube.com/watch?v=T6l8pu4Y9Ng',
+        'WARNING: [youtube] Some unrelated warning',
+        'ERROR: [youtube] T6l8pu4Y9Ng: Video unavailable',
+        _marker('end', 1, rc=1, secs=3)]
+    for line in lines:
+        p.feed(line)
+    p.finish()
+    s = p.summary()
+    kinds = {e['id']: e['kind'] for e in s['err']}
+    assert kinds == {'f2UExqbyd3U': 'members_only', 'T6l8pu4Y9Ng': 'unavailable'}
+    assert s['sum']['members'] == 1 and s['sum']['failed'] == 1
+    # The warning before the first item belongs to no video.
+    assert 'cookies' not in str(s['err']).lower()
+
+
 def test_forged_lines_without_the_nonce_are_ignored():
     p = se.LogParser(NONCE, run=RUN)
     p.add_events([_start('a'), _end('a', '/downloads/a.mp4')])
