@@ -507,6 +507,7 @@ _MESSAGE_RE = re.compile(
 _ITEM_RE = re.compile(
     r'^\[download\] Downloading item (?P<i>\d+) of (?P<n>\d+|N/A)$')
 _PLAYLIST_START_RE = re.compile(r'^\[download\] Downloading playlist: (?P<t>.*)$')
+_EXTRACTING_RE = re.compile(r'^\[[^\]]+\] Extracting URL: ')
 _PLAYLIST_END_RE = re.compile(
     r'^\[download\] Finished downloading playlist: (?P<t>.*)$')
 
@@ -573,6 +574,10 @@ class Entry:
         self.errors = collections.OrderedDict()
         self.warnings = collections.defaultdict(list)   # id -> [msg]
         self.entry_errors = []   # ERROR lines with no video to belong to
+        # WARNING lines that name no video, seen before the video opened,
+        # e.g. 'WARNING: [youtube] Join this channel ...' while extracting:
+        # they go to the next video that starts or names itself in an ERROR.
+        self.loose = []
         self.open = None         # id of the video being processed
         self.pending = collections.deque()   # events not matched to the log yet
         self.owed = 0            # 'Writing' lines seen before their event
@@ -650,6 +655,8 @@ class LogParser:
         vid = event['i']['id']
         _update_video(entry.video(vid), event)
         entry.open = vid if event['t'] == 'start' else None
+        if entry.open:
+            self._adopt_loose(entry, vid)
 
     def _flush(self, entry):
         while entry.pending:
@@ -696,6 +703,10 @@ class LogParser:
             entry.open = None
             entry.phase = ''
             entry.phase_id = None
+            entry.loose = []
+            return
+        if _EXTRACTING_RE.match(line):
+            entry.loose = []
             return
         match = _PLAYLIST_START_RE.match(line)
         if match:
@@ -711,9 +722,12 @@ class LogParser:
             target = vid or entry.open
             if target:
                 _keep_last(entry.warnings[target], msg)
+            else:
+                _keep_last(entry.loose, msg)
             return
         if vid:
             # '[ie] id: ...' names the video (or playlist) itself.
+            self._adopt_loose(entry, vid)
             _keep_last(entry.errors.setdefault(vid, []),
                        (True, msg, match.group('ie')))
         elif entry.open:
@@ -722,6 +736,12 @@ class LogParser:
         elif (msg not in entry.entry_errors
               and len(entry.entry_errors) < MAX_ERRORS):
             entry.entry_errors.append(msg)
+
+    @staticmethod
+    def _adopt_loose(entry, vid):
+        for msg in entry.loose:
+            _keep_last(entry.warnings[vid], msg)
+        entry.loose = []
 
     def _nonce_line(self, match):
         kind = match.group('kind')
@@ -752,6 +772,7 @@ class LogParser:
         # from Concat, is no video: its errors count for the whole entry.)
         entry.open = vid
         entry.phase_id = vid
+        self._adopt_loose(entry, vid)
         if 'progress.postprocessor' in data:
             name = clean_text(data.get('progress.postprocessor'), 40)
             if data.get('progress.status') == 'finished':
